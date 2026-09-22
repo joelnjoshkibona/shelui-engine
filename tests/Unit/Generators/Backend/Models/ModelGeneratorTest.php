@@ -143,15 +143,24 @@ class ModelGeneratorTest extends TestCase
         $this->assertStringNotContainsString('public $timestamps = false;', $content);
     }
 
-    public function test_legacy_created_date_modified_date_columns_still_use_custom_constants(): void
+    /**
+     * shelui-engine fork: superseded the old "rescan $fields for a literal
+     * created_date/modified_date pair, regardless of has_timestamps" branch
+     * this test used to cover — that rescan fired even when has_timestamps
+     * was explicitly false, disagreeing with MigrationGenerator (which only
+     * ever read the flag, and would try to ALSO emit a conflicting
+     * `$table->timestamps()` call whenever the flag defaulted true for the
+     * same config). The single resolution rule is now
+     * ModuleConfigContract::timestampColumns(): has_timestamps: true, plus
+     * a `timestamp_columns` override, and the legacy-named columns are
+     * NOT declared in columns[] — same convention as the Laravel-default
+     * pair being excluded from columns[] for every other module.
+     */
+    public function test_custom_timestamp_column_names_use_custom_constants(): void
     {
         $content = $this->generateAndRead($this->baseConfig([
-            'has_timestamps' => false, // should be overridden by the legacy-column branch
-            'columns' => [
-                ['name' => 'title', 'type' => 'string'],
-                ['name' => 'created_date', 'type' => 'datetime'],
-                ['name' => 'modified_date', 'type' => 'datetime'],
-            ],
+            'has_timestamps' => true,
+            'timestamp_columns' => ['created_at' => 'created_date', 'updated_at' => 'modified_date'],
         ]));
 
         $this->assertStringContainsString("const CREATED_AT = 'created_date';", $content);

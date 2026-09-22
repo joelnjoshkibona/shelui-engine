@@ -40,6 +40,7 @@ class ModelGenerator extends BaseGenerator
             '[[timestamps]]' => $this->generateTimestamps(),
             '[[softDeletesImport]]' => $this->generateSoftDeletesImport(),
             '[[softDeletesTrait]]' => $this->generateSoftDeletesTrait(),
+            '[[softDeleteColumnOverride]]' => $this->generateSoftDeleteColumnOverride(),
             '[[bootMethod]]' => $this->generateBootMethod(),
             '[[auditRelationships]]' => $this->generateAuditRelationships(),
             '[[relationships]]' => $this->generateRelationships(),
@@ -133,14 +134,57 @@ PHP;
         return $conn ? "protected \$connection = '{$conn}';" : '';
     }
 
+    /**
+     * shelui-engine fork: column NAMES come from ModuleConfigContract::
+     * timestampColumns() (module.json's `timestamp_columns`) instead of a
+     * hardcoded 'created_date'/'modified_date' rescan of this module's own
+     * columns. The old rescan fired regardless of has_timestamps and
+     * disagreed with MigrationGenerator, which only ever read the flag —
+     * a module using the rescan's literal names got Eloquent-managed
+     * timestamps here while MigrationGenerator (before its own fork fix)
+     * would separately try to emit a conflicting `$table->timestamps()`
+     * call for the SAME table whenever has_timestamps defaulted true. One
+     * resolution rule now, shared with MigrationGenerator, same as every
+     * other has_X fact in this class.
+     */
     protected function generateTimestamps(): string
     {
-        $names = array_map(fn($f) => $f['name'] ?? null, $this->fields ?? []);
-        if (in_array('created_date', $names, true) && in_array('modified_date', $names, true)) {
-            return "const CREATED_AT = 'created_date';\n    const UPDATED_AT = 'modified_date';";
+        if (!$this->hasTimestamps()) {
+            return 'public $timestamps = false;';
         }
 
-        return $this->hasTimestamps() ? '' : 'public $timestamps = false;';
+        $columns = ModuleConfigContract::timestampColumns($this->config);
+        if ($columns['created'] === 'created_at' && $columns['updated'] === 'updated_at') {
+            return '';
+        }
+
+        return "const CREATED_AT = '{$columns['created']}';\n    const UPDATED_AT = '{$columns['updated']}';";
+    }
+
+    /**
+     * A custom soft-delete column name needs a matching model-side
+     * declaration so the record is actually read/written through the real
+     * column instead of the default 'deleted_at' ('timestamp' type) or
+     * 'is_deleted' ('flag' type, App\Project\_Src\Traits\HasIsDeleted in
+     * the consuming app — see that trait's own `$isDeletedColumn` static
+     * property, which this mirrors the same way generateTimestamps()
+     * mirrors Laravel's own CREATED_AT/UPDATED_AT override mechanism).
+     * Emits nothing for a module on either default, or one without soft
+     * deletes at all — most generated Models are unaffected.
+     */
+    protected function generateSoftDeleteColumnOverride(): string
+    {
+        if (!$this->hasSoftDeletes()) {
+            return '';
+        }
+
+        $column = ModuleConfigContract::softDeleteColumn($this->config);
+
+        if (ModuleConfigContract::softDeleteType($this->config) === 'flag') {
+            return $column === 'is_deleted' ? '' : "protected static string \$isDeletedColumn = '{$column}';";
+        }
+
+        return $column === 'deleted_at' ? '' : "const DELETED_AT = '{$column}';";
     }
 
     /**
@@ -173,14 +217,33 @@ PHP;
         return ModuleConfigContract::hasSoftDeletes($this->config);
     }
 
+    /**
+     * shelui-engine fork: ModuleConfigContract::softDeleteType() picks
+     * between Laravel's own SoftDeletes (default) and this project's
+     * legacy integer-flag convention, App\Project\_Src\Traits\HasIsDeleted
+     * in the consuming app (ported from ongeza-pro) — see that method's
+     * docblock. A module generated before soft_delete_type existed always
+     * resolves 'timestamp', so it keeps importing SoftDeletes exactly as
+     * before.
+     */
     protected function generateSoftDeletesImport(): string
     {
-        return $this->hasSoftDeletes() ? 'use Illuminate\\Database\\Eloquent\\SoftDeletes;' : '';
+        if (!$this->hasSoftDeletes()) {
+            return '';
+        }
+
+        return ModuleConfigContract::softDeleteType($this->config) === 'flag'
+            ? 'use App\\Project\\_Src\\Traits\\HasIsDeleted;'
+            : 'use Illuminate\\Database\\Eloquent\\SoftDeletes;';
     }
 
     protected function generateSoftDeletesTrait(): string
     {
-        return $this->hasSoftDeletes() ? ', SoftDeletes' : '';
+        if (!$this->hasSoftDeletes()) {
+            return '';
+        }
+
+        return ModuleConfigContract::softDeleteType($this->config) === 'flag' ? ', HasIsDeleted' : ', SoftDeletes';
     }
 
     protected function getModelTemplate(string $modelType): string
@@ -198,14 +261,29 @@ PHP;
     protected function generateCasts(): string
     {
         $casts = [];
-        
+
+        // Skip primary key and any system timestamp/soft-delete column this
+        // module actually has -- by its CONFIGURED name (ModuleConfigContract::
+        // timestampColumns()/softDeleteColumn()), not a fixed guess list. A
+        // compliant config never declares these in columns[] to begin with
+        // (the same convention SKIP_COLUMNS enforces for the Laravel-default
+        // names during introspection); this is purely defensive.
+        $skipNames = ['id'];
+        if ($this->hasTimestamps()) {
+            $tsColumns = ModuleConfigContract::timestampColumns($this->config);
+            $skipNames[] = $tsColumns['created'];
+            $skipNames[] = $tsColumns['updated'];
+        }
+        if ($this->hasSoftDeletes()) {
+            $skipNames[] = ModuleConfigContract::softDeleteColumn($this->config);
+        }
+
         // Auto-detect casts from database fields
         foreach ($this->fields as $field) {
             $fieldName = $field['name'];
             $fieldType = $field['type'] ?? 'string';
-            
-            // Skip primary key and timestamps
-            if ($fieldName === 'id' || in_array($fieldName, ['created_at', 'updated_at', 'deleted_at', 'created_date', 'modified_date'])) {
+
+            if (in_array($fieldName, $skipNames, true)) {
                 continue;
             }
             
@@ -780,8 +858,11 @@ PHP;
 
             $columnName = $field['name'];
 
-            // Skip audit fields (created_by_id, updated_by_id) - they're handled separately
-            if (in_array($columnName, ['created_by_id', 'updated_by_id'])) {
+            // Skip audit fields (ModuleConfigContract::creatorUpdaterColumns() --
+            // 'created_by_id'/'updated_by_id' by default, or a module.json override) --
+            // they're handled separately by generateAuditRelationships().
+            $auditColumns = ModuleConfigContract::creatorUpdaterColumns($this->config);
+            if ($columnName === $auditColumns['created'] || $columnName === $auditColumns['updated']) {
                 continue;
             }
 
@@ -1067,29 +1148,44 @@ PHP;
         return ModuleConfigContract::hasCreatorUpdater($this->config);
     }
 
+    /**
+     * shelui-engine fork: FK column names come from ModuleConfigContract::
+     * creatorUpdaterColumns() instead of the hardcoded 'created_by_id'/
+     * 'updated_by_id' pair. A single-actor module (creatorUpdaterColumns()
+     * returns 'updated' => null, e.g. this project's legacy tables that
+     * only ever recorded who created a row) gets ONLY creator() — emitting
+     * an updater() relation for a column that doesn't exist would throw the
+     * moment anything eager-loads it, the exact bug hasCreatorUpdater()
+     * itself already guards against for a module with no audit columns at
+     * all.
+     */
     protected function generateAuditRelationships(): string
     {
         if (!$this->hasCreatorUpdater()) {
             return '';
         }
 
+        $columns = ModuleConfigContract::creatorUpdaterColumns($this->config);
         $usersNs = '\\App\\Project\\Modules\\Core\\Users\\Users\\UsersModel';
 
         $auditRelationships = [
             "    public function creator(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",
             "    {",
             "        return \$this->belongsTo(",
-            "            {$usersNs}::class, 'created_by_id', 'id'",
+            "            {$usersNs}::class, '{$columns['created']}', 'id'",
             "        );",
             "    }",
-            "",
-            "    public function updater(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",
-            "    {",
-            "        return \$this->belongsTo(",
-            "            {$usersNs}::class, 'updated_by_id', 'id'",
-            "        );",
-            "    }"
         ];
+
+        if ($columns['updated'] !== null) {
+            $auditRelationships[] = "";
+            $auditRelationships[] = "    public function updater(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo";
+            $auditRelationships[] = "    {";
+            $auditRelationships[] = "        return \$this->belongsTo(";
+            $auditRelationships[] = "            {$usersNs}::class, '{$columns['updated']}', 'id'";
+            $auditRelationships[] = "        );";
+            $auditRelationships[] = "    }";
+        }
 
         return implode("\n", $auditRelationships);
     }

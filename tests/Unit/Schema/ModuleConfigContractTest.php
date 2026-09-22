@@ -244,4 +244,115 @@ class ModuleConfigContractTest extends TestCase
     {
         $this->assertFalse(ModuleConfigContract::isFrontendEnabled(['features' => ['frontend' => ['enabled' => false]]]));
     }
+
+    // ─── ModuleConfigContract::timestampColumns() direct coverage ──────────
+
+    public function test_contract_timestamp_columns_defaults_to_laravel_pair(): void
+    {
+        $this->assertSame(
+            ['created' => 'created_at', 'updated' => 'updated_at'],
+            ModuleConfigContract::timestampColumns(['columns' => []])
+        );
+    }
+
+    public function test_contract_timestamp_columns_trusts_explicit_override(): void
+    {
+        $config = ['timestamp_columns' => ['created_at' => 'created_date', 'updated_at' => 'modified_date']];
+        $this->assertSame(
+            ['created' => 'created_date', 'updated' => 'modified_date'],
+            ModuleConfigContract::timestampColumns($config)
+        );
+    }
+
+    public function test_contract_timestamp_columns_rejects_non_array_override(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::timestampColumns(['timestamp_columns' => 'created_date']);
+    }
+
+    public function test_contract_timestamp_columns_rejects_empty_string(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::timestampColumns(['timestamp_columns' => ['created_at' => '']]);
+    }
+
+    // ─── ModuleConfigContract::softDeleteType() / softDeleteColumn() ───────
+
+    public function test_contract_soft_delete_type_defaults_to_timestamp(): void
+    {
+        $this->assertSame('timestamp', ModuleConfigContract::softDeleteType([]));
+    }
+
+    public function test_contract_soft_delete_type_trusts_explicit_flag(): void
+    {
+        $this->assertSame('flag', ModuleConfigContract::softDeleteType(['soft_delete_type' => 'flag']));
+    }
+
+    public function test_contract_soft_delete_type_rejects_unknown_value(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::softDeleteType(['soft_delete_type' => 'is_deleted']);
+    }
+
+    public function test_contract_soft_delete_column_defaults_to_deleted_at_for_timestamp_type(): void
+    {
+        $this->assertSame('deleted_at', ModuleConfigContract::softDeleteColumn([]));
+    }
+
+    public function test_contract_soft_delete_column_defaults_to_is_deleted_for_flag_type(): void
+    {
+        $this->assertSame('is_deleted', ModuleConfigContract::softDeleteColumn(['soft_delete_type' => 'flag']));
+    }
+
+    public function test_contract_soft_delete_column_trusts_explicit_override(): void
+    {
+        $config = ['soft_delete_type' => 'flag', 'soft_delete_column' => 'deleted_flag'];
+        $this->assertSame('deleted_flag', ModuleConfigContract::softDeleteColumn($config));
+    }
+
+    public function test_contract_soft_delete_column_rejects_empty_string(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::softDeleteColumn(['soft_delete_column' => '']);
+    }
+
+    // ─── ModuleConfigContract::creatorUpdaterColumns() direct coverage ─────
+
+    public function test_contract_creator_updater_columns_defaults_to_historical_pair(): void
+    {
+        $this->assertSame(
+            ['created' => 'created_by_id', 'updated' => 'updated_by_id'],
+            ModuleConfigContract::creatorUpdaterColumns([])
+        );
+    }
+
+    public function test_contract_creator_updater_columns_trusts_explicit_override(): void
+    {
+        $config = ['creator_updater_columns' => ['created_by' => 'created_by', 'updated_by' => 'modified_by']];
+        $this->assertSame(
+            ['created' => 'created_by', 'updated' => 'modified_by'],
+            ModuleConfigContract::creatorUpdaterColumns($config)
+        );
+    }
+
+    public function test_contract_creator_updater_columns_allows_null_updated_by_for_single_actor_modules(): void
+    {
+        $config = ['creator_updater_columns' => ['created_by' => 'created_by', 'updated_by' => null]];
+        $this->assertSame(
+            ['created' => 'created_by', 'updated' => null],
+            ModuleConfigContract::creatorUpdaterColumns($config)
+        );
+    }
+
+    public function test_contract_creator_updater_columns_rejects_empty_created_by(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::creatorUpdaterColumns(['creator_updater_columns' => ['created_by' => '']]);
+    }
+
+    public function test_contract_creator_updater_columns_rejects_empty_updated_by(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::creatorUpdaterColumns(['creator_updater_columns' => ['updated_by' => '']]);
+    }
 }

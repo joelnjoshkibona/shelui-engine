@@ -66,7 +66,7 @@ class [[ModuleName]]CreateService
 
     public static function beforeCreate($validData) {
         //Before Create
-        $validData['created_by_id'] = Auth::id();
+        [[createdByAssignment]]
         [[beforeCreate]]
         return $validData;
     }

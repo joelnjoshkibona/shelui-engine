@@ -120,6 +120,32 @@ class ActionSplashServiceGeneratorTest extends TestCase
         $this->assertStringNotContainsString('Splash data for the "YearReport" action.', $content);
     }
 
+    /**
+     * shelui-engine fork: [[routeKeyParam]] (from BaseGenerator's shared
+     * defaults) replaced the hardcoded 'uuid' in this stub -- a has_uuid:
+     * false module's splash service now takes/passes $id, matching
+     * RoutesGenerator's own {id} splash route segment for the same module.
+     */
+    public function test_splash_service_uses_id_parameter_when_has_uuid_false(): void
+    {
+        $config = $this->baseConfig(
+            ['name' => 'report', 'splash' => true, 'operations' => []],
+            'report'
+        );
+        $config['has_uuid'] = false;
+        $generator = new ActionSplashServiceGenerator('Widgets', 'Core', $config, 'report', $config['actions']['report']);
+        $generator->setForce(true);
+        $this->assertTrue($generator->generate());
+
+        $content = file_get_contents($this->modulePath() . '/Services/WidgetsReportSplashService.php');
+
+        $this->assertStringContainsString('public static function execute(string $id, array $data = [])', $content);
+        $this->assertStringContainsString('return self::process($id, $data);', $content);
+        $this->assertStringContainsString('public static function process(string $id, array $data = []): array', $content);
+        $this->assertStringContainsString('/widgets/{id}/report/splash', $content);
+        $this->assertStringNotContainsString('uuid', $content);
+    }
+
     public function test_write_once_a_hand_edit_survives_a_regenerate(): void
     {
         $action = ['name' => 'report', 'serviceName' => 'WidgetsYearReportService', 'splash' => true, 'operations' => []];

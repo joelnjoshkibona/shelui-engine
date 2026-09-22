@@ -100,6 +100,41 @@ class BaseServiceGeneratorTest extends TestCase
         $this->assertSame("['name', 'parent_id', 'status_id', 'id', 'created_at']", $result);
     }
 
+    /**
+     * shelui-engine fork: closes the gap the has_uuid fix's own docblock
+     * flagged as deliberately deferred -- a has_timestamps: false module has
+     * no 'created_at' column at all, and offering it as a filter would query
+     * a nonexistent column exactly like the uuid case above.
+     */
+    public function test_filterable_fields_omits_created_at_when_has_timestamps_is_false(): void
+    {
+        $generator = $this->makeGenerator([
+            'has_timestamps' => false,
+            'features' => ['backend' => ['list' => [
+                'filterableFields' => ['name'],
+            ]]],
+        ]);
+
+        $result = $generator->callGenerateFilterableFields();
+
+        $this->assertSame("['name', 'id', 'uuid']", $result);
+    }
+
+    public function test_filterable_fields_uses_configured_timestamp_column_name(): void
+    {
+        $generator = $this->makeGenerator([
+            'has_timestamps' => true,
+            'timestamp_columns' => ['created_at' => 'created_date', 'updated_at' => 'modified_date'],
+            'features' => ['backend' => ['list' => [
+                'filterableFields' => ['name'],
+            ]]],
+        ]);
+
+        $result = $generator->callGenerateFilterableFields();
+
+        $this->assertSame("['name', 'id', 'uuid', 'created_date']", $result);
+    }
+
     public function test_filterable_fields_does_not_duplicate_id_uuid_or_created_at_if_already_configured(): void
     {
         $generator = $this->makeGenerator([
@@ -980,6 +1015,25 @@ class BaseServiceGeneratorTest extends TestCase
         $this->assertSame('[]', $result);
     }
 
+    /**
+     * shelui-engine fork: a single-actor module (creatorUpdaterColumns()
+     * returns 'updated' => null) has no updater() relation on the model at
+     * all (ModelGenerator::generateAuditRelationships()) -- eager loading it
+     * would throw RelationNotFoundException, the exact bug this whole gate
+     * already exists to prevent for has_creator_updater: false.
+     */
+    public function test_eager_load_relationships_omits_updater_only_for_single_actor_module(): void
+    {
+        $generator = $this->makeGenerator([
+            'has_creator_updater' => true,
+            'creator_updater_columns' => ['created_by' => 'created_by', 'updated_by' => null],
+        ]);
+
+        $result = $generator->callGenerateEagerLoadRelationships('view');
+
+        $this->assertSame("['creator']", $result);
+    }
+
     public function test_eager_load_relationships_custom_string_config_still_appends_creator_updater_by_default(): void
     {
         $generator = $this->makeGenerator([
@@ -1296,7 +1350,7 @@ class BaseServiceGeneratorTest extends TestCase
 
         $result = $generator->callBuildInlineInjectArray(
             ['parent_fk' => 'order_id', 'child_module' => 'OrderItems'],
-            'created_by_id'
+            'created'
         );
 
         $this->assertStringContainsString("'created_by_id' => Auth::id()", $result);
@@ -1311,7 +1365,7 @@ class BaseServiceGeneratorTest extends TestCase
 
         $result = $generator->callBuildInlineInjectArray(
             ['parent_fk' => 'order_id', 'child_module' => 'OrderItems'],
-            'created_by_id'
+            'created'
         );
 
         $this->assertStringNotContainsString('created_by_id', $result);
@@ -1326,7 +1380,7 @@ class BaseServiceGeneratorTest extends TestCase
 
         $result = $generator->callBuildInlineInjectArray(
             ['parent_fk' => 'order_id', 'child_module' => 'TotallyUnregisteredModule'],
-            'created_by_id'
+            'created'
         );
 
         $this->assertStringNotContainsString('created_by_id', $result);
@@ -1341,7 +1395,7 @@ class BaseServiceGeneratorTest extends TestCase
 
         $result = $generator->callBuildInlineInjectArray(
             ['parent_fk' => 'order_id', 'child_module' => 'OrderItems', 'child_has_creator_updater' => true],
-            'created_by_id'
+            'created'
         );
 
         $this->assertStringContainsString("'created_by_id' => Auth::id()", $result);
@@ -1356,7 +1410,7 @@ class BaseServiceGeneratorTest extends TestCase
 
         $result = $generator->callBuildInlineInjectArray(
             ['parent_fk' => 'order_id', 'child_module' => 'OrderItems', 'child_has_creator_updater' => false],
-            'created_by_id'
+            'created'
         );
 
         $this->assertStringNotContainsString('created_by_id', $result);
@@ -1375,10 +1429,82 @@ class BaseServiceGeneratorTest extends TestCase
 
         $result = $generator->callBuildInlineInjectArray(
             ['parent_fk' => 'order_id', 'child_module' => 'OrderItems'],
-            'created_by_id'
+            'created'
         );
 
         $this->assertStringContainsString("'created_by_id' => Auth::id()", $result);
+    }
+
+    /**
+     * shelui-engine fork: the CHILD module's own creator_updater_columns
+     * override (registry-sourced, mirroring child_has_creator_updater's own
+     * resolution rule) is used instead of always assuming 'created_by_id'/
+     * 'updated_by_id' -- a legacy child table (this project's convention)
+     * gets its real column names populated on both the create and update
+     * branches of inline_items sync.
+     */
+    public function test_inline_inject_array_uses_child_registry_creator_updater_column_names(): void
+    {
+        PathManager::setModuleRegistry([
+            ['name' => 'OrderItems', 'module_type' => 'Custom', 'config' => [
+                'has_creator_updater' => true,
+                'creator_updater_columns' => ['created_by' => 'created_by', 'updated_by' => 'modified_by'],
+            ]],
+        ]);
+        $generator = $this->makeGenerator();
+
+        $created = $generator->callBuildInlineInjectArray(
+            ['parent_fk' => 'order_id', 'child_module' => 'OrderItems'],
+            'created'
+        );
+        $updated = $generator->callBuildInlineInjectArray(
+            ['parent_fk' => 'order_id', 'child_module' => 'OrderItems'],
+            'updated'
+        );
+
+        $this->assertStringContainsString("'created_by' => Auth::id()", $created);
+        $this->assertStringNotContainsString('created_by_id', $created);
+        $this->assertStringContainsString("'modified_by' => Auth::id()", $updated);
+        $this->assertStringNotContainsString('updated_by_id', $updated);
+    }
+
+    public function test_inline_inject_array_omits_updated_for_single_actor_child(): void
+    {
+        PathManager::setModuleRegistry([
+            ['name' => 'OrderItems', 'module_type' => 'Custom', 'config' => [
+                'has_creator_updater' => true,
+                'creator_updater_columns' => ['created_by' => 'created_by', 'updated_by' => null],
+            ]],
+        ]);
+        $generator = $this->makeGenerator();
+
+        $updated = $generator->callBuildInlineInjectArray(
+            ['parent_fk' => 'order_id', 'child_module' => 'OrderItems'],
+            'updated'
+        );
+
+        $this->assertStringNotContainsString('=> Auth::id()', $updated);
+    }
+
+    public function test_inline_inject_array_explicit_item_level_column_override_wins(): void
+    {
+        // No registry entry at all -- the inline_items item's own
+        // child_creator_updater_columns override still resolves the name,
+        // same as child_has_creator_updater's own explicit-override escape
+        // hatch for an unregistered/hand-authored child.
+        $generator = $this->makeGenerator();
+
+        $created = $generator->callBuildInlineInjectArray(
+            [
+                'parent_fk' => 'order_id',
+                'child_module' => 'TotallyUnregisteredModule',
+                'child_has_creator_updater' => true,
+                'child_creator_updater_columns' => ['created_by' => 'created_by', 'updated_by' => 'modified_by'],
+            ],
+            'created'
+        );
+
+        $this->assertStringContainsString("'created_by' => Auth::id()", $created);
     }
 
     // ─── Secret-like columns never reach filter/sort allow-lists ───────────
@@ -1607,8 +1733,8 @@ class TestBaseServiceGenerator extends BaseServiceGenerator
         return $this->buildChildNamespace($childModule);
     }
 
-    public function callBuildInlineInjectArray(array $item, ?string $auditField = null): string
+    public function callBuildInlineInjectArray(array $item, ?string $which = null): string
     {
-        return $this->buildInlineInjectArray($item, $auditField);
+        return $this->buildInlineInjectArray($item, $which);
     }
 }

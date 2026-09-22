@@ -4,6 +4,7 @@ namespace Blutrixx\GeneratorEngine\Generators\Backend\Services\Delegation;
 
 use Blutrixx\GeneratorEngine\Generators\Backend\Services\BaseServiceGenerator;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 use Illuminate\Support\Str;
 
 class DelegationServiceGenerator extends BaseServiceGenerator
@@ -111,7 +112,12 @@ class DelegationServiceGenerator extends BaseServiceGenerator
         $content = $this->getTemplateContent('Features/delegation/service', 'backend');
 
         $delegationName = Str::studly($this->delegation['name'] ?? $this->delegationKey);
-        $parentKey = $this->delegation['parentKey'] ?? 'uuid';
+        // shelui-engine fork: must resolve identically to RoutesGenerator::
+        // generateDelegationRoutes()/ControllerGenerator::generateDelegationMethods()'s
+        // own parentKey default -- this service's method signatures are
+        // called with whatever value the controller extracted from the URL
+        // segment those two build, so all three must agree on the same name.
+        $parentKey = $this->delegation['parentKey'] ?? (ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id');
         $filterKey = $this->delegation['filterKey'] ?? 'parent_id';
         $parentIdField = $this->delegation['parentIdField'] ?? 'id';
 

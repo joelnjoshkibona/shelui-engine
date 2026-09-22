@@ -3,6 +3,7 @@
 namespace Blutrixx\GeneratorEngine\Generators\Backend\Seeders;
 
 use Blutrixx\GeneratorEngine\Generators\BaseGenerator;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 
 class SeederGenerator extends BaseGenerator
 {
@@ -189,11 +190,25 @@ class SeederGenerator extends BaseGenerator
     {
         $processedData = [];
 
+        // shelui-engine fork: this used to set 'created_by_id'/'updated_by_id'
+        // unconditionally on every row -- a has_creator_updater: false
+        // module (no such columns at all) got seed rows with unknown-column
+        // keys, and a custom-named module (this project's legacy
+        // 'created_by'/'modified_by') never got its real audit columns
+        // populated at all. Gated the same way every other has_X decision in
+        // this codebase is, using the module's own configured column names.
+        $hasCreatorUpdater = ModuleConfigContract::hasCreatorUpdater($this->config);
+        $auditColumns = $hasCreatorUpdater ? ModuleConfigContract::creatorUpdaterColumns($this->config) : null;
+
         foreach ($this->seedData as $index => $item) {
             $processedItem = $item;
             $processedItem['id'] = $index + 1;
-            $processedItem['created_by_id'] = $processedItem['created_by_id'] ?? 1;
-            $processedItem['updated_by_id'] = $processedItem['updated_by_id'] ?? 1;
+            if ($auditColumns !== null) {
+                $processedItem[$auditColumns['created']] = $processedItem[$auditColumns['created']] ?? 1;
+                if ($auditColumns['updated'] !== null) {
+                    $processedItem[$auditColumns['updated']] = $processedItem[$auditColumns['updated']] ?? 1;
+                }
+            }
             $processedData[] = $processedItem;
         }
 

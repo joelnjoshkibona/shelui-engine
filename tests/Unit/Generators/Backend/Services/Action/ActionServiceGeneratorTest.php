@@ -94,6 +94,43 @@ class ActionServiceGeneratorTest extends TestCase
         $this->assertSame($handWritten, file_get_contents($path), 'a forced regenerate must not overwrite hand-written action service logic');
     }
 
+    /**
+     * shelui-engine fork: the record-lookup seam used to trigger only on a
+     * literal 'uuid' urlParam -- a has_uuid: false module's action
+     * (urlParams: ['id'], the correct convention for such a module) got no
+     * auto-scoped lookup at all. ModuleConfigContract::hasUuid() now decides
+     * which param name to look for, and the lookup body itself queries and
+     * binds that same name instead of a hardcoded 'uuid'/$uuid.
+     */
+    public function test_record_lookup_uses_id_when_has_uuid_is_false(): void
+    {
+        $generator = new ActionServiceGenerator('PurchaseOrders', 'Demo', ['has_uuid' => false], 'receive', [
+            'name' => 'receive',
+            'urlParams' => ['id'],
+        ]);
+
+        $this->assertTrue($generator->generate());
+
+        $content = (string) file_get_contents($this->filePath('Demo', 'PurchaseOrders'));
+
+        $this->assertStringContainsString("\$record = \$recordQuery->where('id', \$id)->first();", $content);
+        $this->assertStringNotContainsString('uuid', $content);
+    }
+
+    public function test_record_lookup_absent_when_urlparams_names_something_else(): void
+    {
+        $generator = new ActionServiceGenerator('PurchaseOrders', 'Demo', ['has_uuid' => false], 'receive', [
+            'name' => 'receive',
+            'urlParams' => ['year'],
+        ]);
+
+        $this->assertTrue($generator->generate());
+
+        $content = (string) file_get_contents($this->filePath('Demo', 'PurchaseOrders'));
+
+        $this->assertStringNotContainsString('recordQuery', $content);
+    }
+
     // ─── Plan 033: serviceMethod / serviceArgs on the first-time stub ────────
 
     public function test_default_signature_with_a_url_param_when_keys_are_absent(): void

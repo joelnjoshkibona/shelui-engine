@@ -131,6 +131,27 @@ class PhpUnitTestGenerator extends BaseGenerator
     /** Singular Studly form of the module name, e.g. "LocationType". */
     protected string $moduleSingular;
 
+    /**
+     * shelui-engine fork: whether this module's table has a `uuid` column
+     * at all (ModuleConfigContract::hasUuid()). Every generated test used to
+     * hardcode `$fixture->uuid` for the record it just created/fetched — a
+     * has_uuid: false module (this project's legacy-repointed tables) has
+     * no such attribute at all, so every one of those tests would either
+     * hit a malformed URL (`/{module}//view`, uuid resolving to null) or
+     * fatal on the undefined property.
+     */
+    protected bool $hasUuid;
+
+    /**
+     * The record identifier column this module's routes/DB rows actually
+     * use — 'uuid' when $hasUuid, else 'id'. Matches BaseGenerator's own
+     * [[routeKeyParam]] default (ModuleConfigContract::hasUuid()), so the
+     * generated tests exercise exactly the URL segment/DB column the rest
+     * of this fork's generators (Routes/Controller/Model/Service) actually
+     * emit for the same config.
+     */
+    protected string $routeKeyParam;
+
     public function __construct(string $moduleName, string $moduleGroup = 'Core', array $config = [])
     {
         parent::__construct($moduleName, $moduleGroup, $config);
@@ -150,6 +171,8 @@ class PhpUnitTestGenerator extends BaseGenerator
 
         $this->hasSoftDeletes    = ModuleConfigContract::hasSoftDeletes($config);
         $this->hasCreatorUpdater = ModuleConfigContract::hasCreatorUpdater($config);
+        $this->hasUuid           = ModuleConfigContract::hasUuid($config);
+        $this->routeKeyParam     = $this->hasUuid ? 'uuid' : 'id';
 
         // $backendFeatures['list'] is frequently a bare `true` (rather than
         // an array) in hand-rolled test/fixture configs — guarded with
@@ -1029,7 +1052,23 @@ class PhpUnitTestGenerator extends BaseGenerator
             return $editFields;
         }
 
-        $skip = ['id', 'uuid', 'created_at', 'updated_at', 'deleted_at', 'created_by_id', 'updated_by_id'];
+        $skip = ['id'];
+        if ($this->hasUuid) {
+            $skip[] = 'uuid';
+        }
+        if ($this->hasSoftDeletes) {
+            $skip[] = ModuleConfigContract::softDeleteColumn($this->config);
+        }
+        $timestampColumns = ModuleConfigContract::timestampColumns($this->config);
+        $skip[] = $timestampColumns['created'];
+        $skip[] = $timestampColumns['updated'];
+        if ($this->hasCreatorUpdater) {
+            $auditColumns = ModuleConfigContract::creatorUpdaterColumns($this->config);
+            $skip[] = $auditColumns['created'];
+            if ($auditColumns['updated'] !== null) {
+                $skip[] = $auditColumns['updated'];
+            }
+        }
         $fields = [];
         foreach ($this->config['columns'] ?? [] as $column) {
             $name = $column['name'] ?? null;
@@ -2026,12 +2065,24 @@ class PhpUnitTestGenerator extends BaseGenerator
             $compositeLines .= "\n";
         }
 
+        // shelui-engine fork: this used to be an unconditional
+        // 'created_by_id' => UsersModel::DEVELOPER line, regardless of
+        // hasCreatorUpdater -- harmless for a module with no such column
+        // (BaseModel's schema-driven getFillable() silently drops an
+        // attribute that isn't a real column) but still wrong to emit, and
+        // the literal column name never matched a module.json override
+        // (this project's legacy 'created_by' naming).
+        $createdByLine = '';
+        if ($this->hasCreatorUpdater) {
+            $createdByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['created'];
+            $createdByLine = "            '{$createdByColumn}' => UsersModel::DEVELOPER,\n";
+        }
+
         return <<<PHP
     protected function create{$this->moduleSingular}Fixture(array \$overrides = []): {$this->moduleName}Model
     {
 {$sequenceDeclaration}        return {$this->moduleName}Model::create(array_merge([
-{$defaults}{$compositeLines}            'created_by_id' => UsersModel::DEVELOPER,
-        ], \$overrides))->fresh();
+{$defaults}{$compositeLines}{$createdByLine}        ], \$overrides))->fresh();
     }
 PHP;
     }
@@ -2250,7 +2301,8 @@ PHP;
         // rather than a separate test method, so a minimal module without
         // audit columns keeps byte-for-byte identical output.
         if ($this->hasCreatorUpdater) {
-            $assertLines[] = "            ->assertJsonPath('data.created_by_id', (int) UsersModel::DEVELOPER)";
+            $createdByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['created'];
+            $assertLines[] = "            ->assertJsonPath('data.{$createdByColumn}', (int) UsersModel::DEVELOPER)";
         }
 
         $assertBlock = implode("\n", $assertLines);
@@ -2283,10 +2335,10 @@ PHP;
         // outright for the same reason).
         $hashedOrEncryptedAssertLines = [];
         if (!empty($hashedOrEncryptedFields)) {
-            $hashedOrEncryptedAssertLines[] = "        \$fixtureRow = {$this->moduleName}Model::where('uuid', \$response->json('data.uuid'))->first();";
+            $hashedOrEncryptedAssertLines[] = "        \$fixtureRow = {$this->moduleName}Model::where('{$this->routeKeyParam}', \$response->json('data.{$this->routeKeyParam}'))->first();";
             foreach ($hashedOrEncryptedFields as $entry) {
                 $field = $entry['field'];
-                $hashedOrEncryptedAssertLines[] = "        \$this->assertNotSame(\$payload['{$field}'], \\Illuminate\\Support\\Facades\\DB::table('{$tableName}')->where('uuid', \$fixtureRow->uuid)->value('{$field}'));";
+                $hashedOrEncryptedAssertLines[] = "        \$this->assertNotSame(\$payload['{$field}'], \\Illuminate\\Support\\Facades\\DB::table('{$tableName}')->where('{$this->routeKeyParam}', \$fixtureRow->{$this->routeKeyParam})->value('{$field}'));";
                 $hashedOrEncryptedAssertLines[] = $entry['storage'] === 'hashed'
                     ? "        \$this->assertTrue(\\Illuminate\\Support\\Facades\\Hash::check(\$payload['{$field}'], \$fixtureRow->{$field}));"
                     : "        \$this->assertSame(\$payload['{$field}'], \$fixtureRow->{$field});";
@@ -2412,10 +2464,10 @@ PHP;
     {
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
 
-        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->uuid}/view");
+        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/view");
 
         \$response->assertStatus(200)
-            ->assertJsonPath('data.uuid', \$fixture->uuid){$extraAssert};{$decimalAssertLine}
+            ->assertJsonPath('data.{$this->routeKeyParam}', \$fixture->{$this->routeKeyParam}){$extraAssert};{$decimalAssertLine}
     }
 PHP;
     }
@@ -2509,7 +2561,7 @@ PHP;
             // datetime field as the sole assertable column in the first
             // place.
             if ($this->isDateTimeField($field)) {
-                $dateTimeDbAssertLines[] = "        \$this->assertTrue(\\Carbon\\Carbon::parse({$this->moduleName}Model::where('uuid', \$fixture->uuid)->value('{$field}'))->equalTo(\\Carbon\\Carbon::parse(\$payload['{$field}'])));";
+                $dateTimeDbAssertLines[] = "        \$this->assertTrue(\\Carbon\\Carbon::parse({$this->moduleName}Model::where('{$this->routeKeyParam}', \$fixture->{$this->routeKeyParam})->value('{$field}'))->equalTo(\\Carbon\\Carbon::parse(\$payload['{$field}'])));";
                 continue;
             }
 
@@ -2517,9 +2569,15 @@ PHP;
         }
 
         // Audit-column coverage (gap 4) — see buildCreateTestMethod()'s
-        // identical guard for the created_by_id half of this pair.
+        // identical guard for the created_by_id half of this pair. A
+        // single-actor module (creatorUpdaterColumns()['updated'] === null,
+        // this project's legacy creator-only convention) has no updated-by
+        // column to assert at all.
         if ($this->hasCreatorUpdater) {
-            $assertLines[] = "            ->assertJsonPath('data.updated_by_id', (int) UsersModel::DEVELOPER)";
+            $updatedByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['updated'];
+            if ($updatedByColumn !== null) {
+                $assertLines[] = "            ->assertJsonPath('data.{$updatedByColumn}', (int) UsersModel::DEVELOPER)";
+            }
         }
 
         $assertBlock = implode("\n", $assertLines);
@@ -2528,7 +2586,7 @@ PHP;
 
         $dbAssertStatement = <<<PHP
         \$this->assertDatabaseHas('{$tableName}', [
-            'uuid' => \$fixture->uuid,
+            '{$this->routeKeyParam}' => \$fixture->{$this->routeKeyParam},
 {$dbAssertBlock}
         ]);
 PHP;
@@ -2551,8 +2609,8 @@ PHP;
         // Blade's @method('PUT') directive relies on for native HTML file
         // upload forms.
         $editCall = $this->isMultipartModule
-            ? "\$this->post(\"/api/{$routeBase}/{\$fixture->uuid}/edit\", \$payload + ['_method' => 'PUT'], ['Accept' => 'application/json'])"
-            : "\$this->putJson(\"/api/{$routeBase}/{\$fixture->uuid}/edit\", \$payload)";
+            ? "\$this->post(\"/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/edit\", \$payload + ['_method' => 'PUT'], ['Accept' => 'application/json'])"
+            : "\$this->putJson(\"/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/edit\", \$payload)";
 
         return <<<PHP
     public function test_can_edit_{$snakeSingular}(): void
@@ -2580,7 +2638,7 @@ PHP;
     {
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
 
-        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->uuid}/delete/check");
+        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/delete/check");
 
         \$response->assertStatus(200)
             ->assertJsonPath('data.can_delete', true);
@@ -2597,16 +2655,32 @@ PHP;
         // ModelGenerator::hasCreatorUpdater()'s sibling hasSoftDeletes()
         // gate), so the row-is-gone assertion for that case is
         // assertDatabaseMissing() instead.
-        $deletedAssertion = $this->hasSoftDeletes
-            ? "\$this->assertSoftDeleted('{$tableName}', ['id' => \$fixture->id]);"
-            : "\$this->assertDatabaseMissing('{$tableName}', ['id' => \$fixture->id]);";
+        //
+        // shelui-engine fork: a 'flag' soft-delete module (App\Project\_Src\
+        // Traits\HasIsDeleted, e.g. this project's legacy is_deleted
+        // convention) never gets a deleted_at column at all -- assertSoftDeleted()
+        // would fatal on it regardless of column name. Its real, equivalent
+        // assertion is the flag column reading 1 while the row still exists.
+        // A 'timestamp' module on a NON-default column name still uses
+        // assertSoftDeleted()'s own $deletedAtColumn override parameter.
+        if ($this->hasSoftDeletes && ModuleConfigContract::softDeleteType($this->config) === 'flag') {
+            $flagColumn = ModuleConfigContract::softDeleteColumn($this->config);
+            $deletedAssertion = "\$this->assertDatabaseHas('{$tableName}', ['id' => \$fixture->id, '{$flagColumn}' => 1]);";
+        } elseif ($this->hasSoftDeletes) {
+            $deletedAtColumn = ModuleConfigContract::softDeleteColumn($this->config);
+            $deletedAssertion = $deletedAtColumn === 'deleted_at'
+                ? "\$this->assertSoftDeleted('{$tableName}', ['id' => \$fixture->id]);"
+                : "\$this->assertSoftDeleted('{$tableName}', ['id' => \$fixture->id], null, '{$deletedAtColumn}');";
+        } else {
+            $deletedAssertion = "\$this->assertDatabaseMissing('{$tableName}', ['id' => \$fixture->id]);";
+        }
 
         return <<<PHP
     public function test_can_delete_{$snakeSingular}(): void
     {
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
 
-        \$response = \$this->deleteJson("/api/{$routeBase}/{\$fixture->uuid}/delete");
+        \$response = \$this->deleteJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/delete");
 
         \$response->assertStatus(200)
             ->assertJson(['status' => true]);
@@ -2728,7 +2802,7 @@ PHP;
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
         \$this->actingAsUserWithoutPermission();
 
-        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->uuid}/view");
+        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/view");
 
         \$response->assertStatus(403);
     }
@@ -2743,7 +2817,7 @@ PHP;
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
         \$this->actingAsUserWithoutPermission();
 
-        \$response = \$this->putJson("/api/{$routeBase}/{\$fixture->uuid}/edit", []);
+        \$response = \$this->putJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/edit", []);
 
         \$response->assertStatus(403);
     }
@@ -2758,7 +2832,7 @@ PHP;
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
         \$this->actingAsUserWithoutPermission();
 
-        \$response = \$this->deleteJson("/api/{$routeBase}/{\$fixture->uuid}/delete");
+        \$response = \$this->deleteJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/delete");
 
         \$response->assertStatus(403);
     }
@@ -3124,8 +3198,8 @@ PHP;
         \$response = {$createCall};
         \$response->assertStatus(201);
 
-        \$uuid = \$response->json('data.uuid');
-        \$view = \$this->getJson("/api/{$routeBase}/{\$uuid}/view");
+        \$recordKey = \$response->json('data.{$this->routeKeyParam}');
+        \$view = \$this->getJson("/api/{$routeBase}/{\$recordKey}/view");
 
         \$this->assertEqualsWithDelta({$decimalValue}, \$view->json('data.{$fieldName}'), 0.0001);
     }
@@ -3152,14 +3226,14 @@ PHP;
     {
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
 
-        \$this->deleteJson("/api/{$routeBase}/{\$fixture->uuid}/delete")->assertStatus(200);
+        \$this->deleteJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/delete")->assertStatus(200);
 
         \$response = \$this->getJson('/api/{$routeBase}/list');
 
         \$response->assertStatus(200);
 
-        \$uuids = collect(\$response->json('data.data'))->pluck('uuid');
-        \$this->assertFalse(\$uuids->contains(\$fixture->uuid));
+        \$recordKeys = collect(\$response->json('data.data'))->pluck('{$this->routeKeyParam}');
+        \$this->assertFalse(\$recordKeys->contains(\$fixture->{$this->routeKeyParam}));
     }
 PHP;
     }
@@ -3215,7 +3289,7 @@ PHP;
 {$payloadLines}
         ];
 
-        \$response = \$this->putJson("/api/{$routeBase}/{\$fixture->uuid}/edit", \$payload);
+        \$response = \$this->putJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/edit", \$payload);
 
         \$response->assertStatus(200);
 
@@ -3247,7 +3321,7 @@ PHP;
     {
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
 
-        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->uuid}/activity");
+        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/activity");
 
         \$response->assertStatus(200)
             ->assertJson(['status' => true]);
@@ -3395,7 +3469,7 @@ PHP;
         \$response = \$this->postJson('/api/{$routeBase}/bulk-action', [
             'action' => '{$bulkActionKey}',
             'mode' => 'ids',
-            'ids' => [\$first->uuid, \$second->uuid],
+            'ids' => [\$first->{$this->routeKeyParam}, \$second->{$this->routeKeyParam}],
         ]);
 
         \$response->assertStatus(200)
@@ -3567,7 +3641,7 @@ PHP;
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
         \\{$modelFqcn}::factory()->create(['{$column}' => \$fixture->id]);
 
-        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->uuid}/delete/check");
+        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/delete/check");
 
         \$response->assertStatus(200)
             ->assertJsonPath('data.can_delete', false);
@@ -3594,7 +3668,7 @@ PHP;
         \$fixture = \$this->create{$this->moduleSingular}Fixture();
         \\{$modelFqcn}::factory()->create(['{$column}' => \$fixture->id]);
 
-        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->uuid}/delete/check");
+        \$response = \$this->getJson("/api/{$routeBase}/{\$fixture->{$this->routeKeyParam}}/delete/check");
 
         \$response->assertStatus(200)
             ->assertJsonPath('data.can_delete', true);
@@ -3745,14 +3819,19 @@ PHP;
      *
      * Handles the DEFAULT route shape (no urlParams, no custom endpoint.path)
      * and the single most common real-world shape for a single-row action —
-     * `urlParams: ['uuid']`, with or without a custom `endpoint.path` that
-     * embeds `{uuid}` — by mirroring
+     * `urlParams: [$this->routeKeyParam]` ('uuid', or 'id' for a has_uuid:
+     * false module), with or without a custom `endpoint.path` that embeds
+     * that same `{...}` segment — by mirroring
      * RoutesGenerator::generateActionRoutes()'s own path-building for that
-     * one param. Every other urlParams shape (multiple params, or a param
-     * other than `uuid`) still returns [] rather than guess, since resolving
-     * those exactly would mean duplicating the rest of that method's logic
-     * for a value this generator has no way to independently verify is
-     * correct. Also returns [] when this action has nothing enabled.
+     * one param (RoutesGenerator itself treats urlParams as fully free-form
+     * literal names, never special-casing 'uuid' — this module's own
+     * record-identifier name is simply the conventional choice for "this
+     * action operates on one existing row"). Every other urlParams shape
+     * (multiple params, or a param name that isn't this module's own key)
+     * still returns [] rather than guess, since resolving those exactly
+     * would mean duplicating the rest of that method's logic for a value
+     * this generator has no way to independently verify is correct. Also
+     * returns [] when this action has nothing enabled.
      *
      * Called once per `actions[]` entry (see generate()) — every action now
      * gets its own file and its own contract coverage, not just the first
@@ -3769,7 +3848,7 @@ PHP;
         $opConfig = $resolved['opConfig'];
         $urlParams = $action['urlParams'] ?? [];
 
-        if (!empty($urlParams) && $urlParams !== ['uuid']) {
+        if (!empty($urlParams) && $urlParams !== [$this->routeKeyParam]) {
             return [];
         }
 
@@ -3785,16 +3864,17 @@ PHP;
                 $path = '/' . $path;
             }
         } else {
-            $urlParamsPath = !empty($urlParams) ? '/{uuid}' : '';
+            $urlParamsPath = !empty($urlParams) ? '/{' . $this->routeKeyParam . '}' : '';
             $path = "/{$moduleRoute}/{$actionRoute}{$urlParamsPath}/{$op}";
         }
         $apiPath = "/api{$path}";
         $snake = Str::snake(Str::studly($actionName));
 
-        $needsFixture = str_contains($apiPath, '{uuid}');
+        $keyPlaceholder = '{' . $this->routeKeyParam . '}';
+        $needsFixture = str_contains($apiPath, $keyPlaceholder);
         if ($needsFixture) {
-            [$before, $after] = explode('{uuid}', $apiPath, 2);
-            $pathExpr = "'{$before}' . \$fixture->uuid . '{$after}'";
+            [$before, $after] = explode($keyPlaceholder, $apiPath, 2);
+            $pathExpr = "'{$before}' . \$fixture->{$this->routeKeyParam} . '{$after}'";
         } else {
             $pathExpr = "'{$apiPath}'";
         }
@@ -3887,8 +3967,13 @@ PHP;
         // real delegated tables don't have -- confirmed live: a real
         // QueryException, "Column not found: parent_id", not a false
         // assertion.
+        // shelui-engine fork: the 'uuid' fallback must resolve identically to
+        // DelegationConfigNormalizer::normalize()'s own parentKey default
+        // (ModuleConfigContract::hasUuid()) -- this module's delegation route
+        // takes {id}, not {uuid}, for a has_uuid: false module, and a test
+        // built against the wrong segment 404s on every request.
         $parentContext = $delegation['parentContext'] ?? [];
-        $parentKey = $parentContext['parentKey'] ?? $delegation['parentKey'] ?? 'uuid';
+        $parentKey = $parentContext['parentKey'] ?? $delegation['parentKey'] ?? $this->routeKeyParam;
         $moduleRoute = Str::kebab($this->moduleName);
         $operations = $delegation['operations'] ?? [];
         $snake = Str::snake(Str::studly($delegationName));

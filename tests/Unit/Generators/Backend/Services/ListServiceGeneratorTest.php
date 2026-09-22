@@ -288,4 +288,32 @@ class ListServiceGeneratorTest extends TestCase
 
         $this->assertSame(0, $exitCode, 'Generated file has a PHP syntax error: ' . implode("\n", $output));
     }
+
+    // ─── $bulkRecordKeyColumn (shelui-engine fork) ──────────────────────────
+
+    /**
+     * App\Project\_Src\ListServiceTrait::processBulkAction() reads this
+     * property (falling back to 'uuid' when absent) to know which column
+     * identifies a record for bulk dispatch -- a has_uuid: false module
+     * needs it declared explicitly since it has no 'uuid' column at all.
+     */
+    public function test_bulk_record_key_column_emitted_when_has_uuid_is_false(): void
+    {
+        $config = $this->baseConfig([
+            ['name' => 'name', 'type' => 'string', 'nullable' => false],
+        ]);
+        $config['has_uuid'] = false;
+        $content = $this->generateAndRead($config);
+
+        $this->assertStringContainsString("protected static string \$bulkRecordKeyColumn = 'id';", $content);
+    }
+
+    public function test_bulk_record_key_column_omitted_by_default(): void
+    {
+        $content = $this->generateAndRead($this->baseConfig([
+            ['name' => 'name', 'type' => 'string', 'nullable' => false],
+        ]));
+
+        $this->assertStringNotContainsString('bulkRecordKeyColumn', $content);
+    }
 }

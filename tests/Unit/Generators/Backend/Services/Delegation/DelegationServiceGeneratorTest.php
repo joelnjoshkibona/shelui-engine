@@ -132,6 +132,43 @@ class DelegationServiceGeneratorTest extends TestCase
         $this->assertStringContainsString('use App\Project\Modules\System\Custom\ItemPrices\ItemPricesModel;', $content);
     }
 
+    /**
+     * shelui-engine fork: the parentKey default used to be hardcoded 'uuid'
+     * regardless of has_uuid -- for a has_uuid: false parent module (this
+     * project's legacy-repointed tables), the generated list() method both
+     * declared a `string $uuid` parameter no caller would ever supply
+     * (RoutesGenerator/ControllerGenerator resolve 'id' for the same
+     * config) and queried the parent's own table `where('uuid', ...)`
+     * against a column that doesn't exist.
+     */
+    public function test_parent_key_default_is_id_when_has_uuid_is_false(): void
+    {
+        $config = $this->baseConfig();
+        $config['has_uuid'] = false;
+
+        $generator = new DelegationServiceGenerator(
+            'Warehouses',
+            'Custom',
+            $config,
+            'stockMovements',
+            [
+                'name'          => 'StockMovements',
+                'relatedModule' => ['name' => 'StockMovements', 'group' => 'Custom'],
+                'filterKey'     => 'warehouse_id',
+                'operations'    => ['list' => ['enabled' => true]],
+            ]
+        );
+        $generator->setForce(true);
+        $this->assertTrue($generator->generate());
+
+        $path = $this->tmpRoot . '/BACKEND/app/Project/Modules/Custom/Warehouses/Services/WarehousesStockMovementsService.php';
+        $content = (string) file_get_contents($path);
+
+        $this->assertStringContainsString('public static function list(string $id, array $params = []): array', $content);
+        $this->assertStringContainsString("\$parent = \$parentQuery->where('id', \$id)->firstOrFail();", $content);
+        $this->assertStringNotContainsString('uuid', $content);
+    }
+
     public function test_self_delegation_resolves_via_self_registration(): void
     {
         // e.g. Accounts.children -> Accounts. BaseGenerator registers the

@@ -3,6 +3,7 @@
 namespace Blutrixx\GeneratorEngine\Generators\Backend\Services;
 
 use Blutrixx\GeneratorEngine\Helpers\BulkActionConfigNormalizer;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 use Illuminate\Support\Str;
 
 class BulkActionServiceGenerator extends BaseServiceGenerator
@@ -47,6 +48,13 @@ class BulkActionServiceGenerator extends BaseServiceGenerator
     private function buildActionBody(string $actionKey, string $actionPascal, ?string $statusTarget): string
     {
         $module = $this->moduleName;
+        // shelui-engine fork: matches ListServiceTrait::processBulkAction()'s
+        // own $bulkRecordKeyColumn ('uuid' by default, 'id' for a has_uuid:
+        // false module — see ListServiceGenerator::generateBulkRecordKeyColumn())
+        // — this service's $params key MUST agree with whatever key the
+        // dispatcher actually passes, or every bulk action 404s via
+        // firstOrFail()/silently no-ops via first().
+        $keyColumn = ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id';
 
         if (!empty($statusTarget)) {
             // Verbatim, not Str::snake()'d: ModelGenerator::generateConstants()
@@ -63,7 +71,7 @@ class BulkActionServiceGenerator extends BaseServiceGenerator
             // docs/examples/actions.md already documented as correct.
             $constName = $statusTarget;
             return <<<PHP
-\$model = {$module}Model::where('uuid', \$params['uuid'])->first();
+\$model = {$module}Model::where('{$keyColumn}', \$params['{$keyColumn}'])->first();
         if (!\$model) {
             throw new \Exception('{$module} not found');
         }
@@ -75,8 +83,8 @@ PHP;
         }
 
         return <<<PHP
-\$uuid = \$params['uuid'] ?? null;
-        \$record = {$module}Model::where('uuid', \$uuid)->firstOrFail();
+\${$keyColumn} = \$params['{$keyColumn}'] ?? null;
+        \$record = {$module}Model::where('{$keyColumn}', \${$keyColumn})->firstOrFail();
         // TODO: implement {$actionKey} for {$module}
         return Helpers::success(\$record->fresh(), '{$module} {$actionKey} applied successfully');
 PHP;

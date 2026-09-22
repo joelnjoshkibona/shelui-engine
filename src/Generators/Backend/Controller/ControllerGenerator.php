@@ -6,6 +6,7 @@ use Blutrixx\GeneratorEngine\Generators\BaseGenerator;
 use Blutrixx\GeneratorEngine\Generators\PatchesRegions;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
 use Blutrixx\GeneratorEngine\Helpers\ActionServiceInvocation;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 
 class ControllerGenerator extends BaseGenerator
 {
@@ -793,7 +794,12 @@ class ControllerGenerator extends BaseGenerator
     {
         $methods = [];
         $delegationName = \Illuminate\Support\Str::studly($delegation['name'] ?? $delegationKey);
-        $parentKey = $delegation['parentKey'] ?? 'uuid';
+        // shelui-engine fork: must resolve identically to RoutesGenerator::
+        // generateDelegationRoutes()'s own parentKey default (see its
+        // docblock) -- the route segment name and this controller method's
+        // parameter name have to match exactly, or Laravel can never bind
+        // the URL segment to the method argument.
+        $parentKey = $delegation['parentKey'] ?? (ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id');
         $operations = $delegation['operations'] ?? [];
 
         foreach (['list', 'create', 'edit', 'view', 'delete'] as $op) {
@@ -893,11 +899,18 @@ class ControllerGenerator extends BaseGenerator
         // Opt-in splash endpoint for this action — see ActionSplashServiceGenerator.
         if (!empty($action['splash'])) {
             $splashStub = $this->getTemplateContent('Features/actionSplash/controller_method', 'backend');
-            $methods[] = str_replace(
-                ['[[methodName]]', '[[ModuleName]]', '[[ActionName]]'],
-                [lcfirst($baseMethod), $this->moduleName, $serviceNameRaw],
-                $splashStub
-            );
+            // shelui-engine fork: switched from a raw str_replace() to
+            // replacePlaceholders() so this stub picks up [[routeKeyParam]]/
+            // [[routeKeyLabel]] from the shared defaults (BaseGenerator::
+            // replacePlaceholders()) -- a raw str_replace() bypassed them
+            // entirely, so a has_uuid: false module's splash method still
+            // hardcoded `string $uuid` regardless of the route it's actually
+            // bound to (see RoutesGenerator::generateActionRoutes()'s splash
+            // route, which already resolves the matching segment name).
+            $methods[] = $this->replacePlaceholders($splashStub, [
+                '[[methodName]]' => lcfirst($baseMethod),
+                '[[ActionName]]' => $serviceNameRaw,
+            ]);
         }
 
         foreach (['list', 'create', 'edit', 'view', 'delete'] as $op) {

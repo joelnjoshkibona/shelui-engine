@@ -5,6 +5,7 @@ namespace Blutrixx\GeneratorEngine\Generators\Backend\Services\Action;
 use Blutrixx\GeneratorEngine\Generators\Backend\Services\BaseServiceGenerator;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
 use Blutrixx\GeneratorEngine\Helpers\ActionServiceInvocation;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 use Illuminate\Support\Str;
 
 class ActionServiceGenerator extends BaseServiceGenerator
@@ -72,11 +73,21 @@ class ActionServiceGenerator extends BaseServiceGenerator
             $urlParamsArgs = ', ' . implode(', ', $callParts);
         }
 
+        // shelui-engine fork: the record-lookup seam used to trigger only on
+        // a literal 'uuid' urlParam -- a has_uuid: false module's action
+        // (urlParams: ['id'], the correct convention for such a module) got
+        // no auto-scoped lookup at all, and even if a developer copied the
+        // old hand-filled body verbatim it would query a 'uuid' column that
+        // doesn't exist. Recognizes this module's own record-identifier
+        // param name (ModuleConfigContract::hasUuid()) instead of the
+        // literal string.
+        $recordLookupParam = in_array($this->routeKeyParam(), $urlParams, true) ? $this->routeKeyParam() : null;
+
         $content = $this->replacePlaceholders($content, [
             '[[ActionName]]'     => $serviceNameRaw,
             '[[urlParams]]'      => $urlParamsStr,
             '[[urlParamsArgs]]'  => $urlParamsArgs,
-            '[[recordLookup]]'   => in_array('uuid', $urlParams, true) ? $this->buildRecordLookup() : '',
+            '[[recordLookup]]'   => $recordLookupParam !== null ? $this->buildRecordLookup($recordLookupParam) : '',
             '[[serviceMethod]]'      => $invocation['method'],
             '[[serviceParams]]'      => ActionServiceInvocation::serviceParameters($invocation),
             '[[serviceProcessArgs]]' => ActionServiceInvocation::processArguments($invocation),
@@ -97,30 +108,44 @@ class ActionServiceGenerator extends BaseServiceGenerator
     }
 
     /**
-     * Record scope seam for a uuid-taking action (engine v3.5.17). Only
-     * emitted when the action's own urlParams include a 'uuid' -- an action
-     * with no uuid param operates on nothing this generator can scope.
+     * This module's own record-identifier param name -- 'uuid' when
+     * ModuleConfigContract::hasUuid(), else 'id'. Matches BaseGenerator's
+     * own [[routeKeyParam]] default, and RoutesGenerator::
+     * generateActionRoutes()'s urlParams-derived route segment for the same
+     * config.
+     */
+    private function routeKeyParam(): string
+    {
+        return ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id';
+    }
+
+    /**
+     * Record scope seam for an action taking its own record-identifier as a
+     * urlParam (engine v3.5.17). Only emitted when the action's own
+     * urlParams include this module's own key ('uuid', or 'id' for a
+     * has_uuid: false module -- shelui-engine fork) -- an action with no
+     * such param operates on nothing this generator can scope.
      * Uses a fully-qualified Model reference since action/service.stub
      * never `use`s the Model class (its stub body is otherwise
      * Model-agnostic, write-once, hand-filled business logic).
      *
      * Placed as the FIRST line of process(), above the "Add your custom
-     * logic here" TODO, so a uuid outside the acting user's reach 404s
+     * logic here" TODO, so a record outside the acting user's reach 404s
      * before any hand-written logic runs at all -- the same "not found,
      * not forbidden" rule every other generated fetch follows.
      */
-    private function buildRecordLookup(): string
+    private function buildRecordLookup(string $param): string
     {
         $model = '\\' . $this->getNamespace() . '\\' . $this->moduleName . 'Model';
 
         return <<<PHP
 // Record scope seam: an app whose BaseModel defines applyRecordScope() narrows this
-        // lookup to the rows the acting user may reach, so a uuid outside their reach 404s here.
+        // lookup to the rows the acting user may reach, so a {$param} outside their reach 404s here.
         \$recordQuery = {$model}::query();
         if (method_exists({$model}::class, 'applyRecordScope')) {
             \$recordQuery = {$model}::applyRecordScope(\$recordQuery);
         }
-        \$record = \$recordQuery->where('uuid', \$uuid)->first();
+        \$record = \$recordQuery->where('{$param}', \${$param})->first();
         if (!\$record) {
             abort(404, 'Record not found');
         }

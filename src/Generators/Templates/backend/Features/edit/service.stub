@@ -91,7 +91,7 @@ class [[ModuleName]]EditService
 
     public static function beforeUpdate($validData, array $validParams, [[ModuleName]]Model $model) {
         //Before Update
-        $validData['updated_by_id'] = Auth::id();
+        [[updatedByAssignment]]
         [[beforeUpdate]]
         return $validData;
     }

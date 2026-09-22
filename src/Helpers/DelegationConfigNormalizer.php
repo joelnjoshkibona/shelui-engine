@@ -2,9 +2,19 @@
 
 namespace Blutrixx\GeneratorEngine\Helpers;
 
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
+
 class DelegationConfigNormalizer
 {
-    public static function normalize(array $delegation): array
+    /**
+     * @param array $moduleConfig The delegating (parent) module's own config
+     *        -- used only to resolve parentKey's default via
+     *        ModuleConfigContract::hasUuid() (see below). Optional and
+     *        defaults to `[]` (which hasUuid() itself defaults to `true`
+     *        for), so every caller that predates this parameter keeps
+     *        resolving 'uuid' exactly as before.
+     */
+    public static function normalize(array $delegation, array $moduleConfig = []): array
     {
         $delegation['name'] = $delegation['name'] ?? '';
         $delegation['label'] = $delegation['label'] ?? $delegation['name'];
@@ -41,8 +51,17 @@ class DelegationConfigNormalizer
         // fall back to the flat keys for any older config that predates
         // parentContext existing at all; only then fall back to the
         // hardcoded default.
+        // shelui-engine fork: the 'uuid' fallback assumed every delegating
+        // module has a uuid column. A has_uuid: false module's delegation
+        // route/controller-method (RoutesGenerator::generateDelegationRoutes()/
+        // ControllerGenerator::generateDelegationMethods(), which computes the
+        // identical default directly off the same module config) registered
+        // and required a {uuid} segment the module's own routes never
+        // actually receive -- 404ing every time. ModuleConfigContract::
+        // hasUuid($moduleConfig) is the single resolution rule both now share.
         $parentContext = $delegation['parentContext'] ?? [];
-        $delegation['parentKey'] = $parentContext['parentKey'] ?? $delegation['parentKey'] ?? 'uuid';
+        $defaultParentKey = ModuleConfigContract::hasUuid($moduleConfig) ? 'uuid' : 'id';
+        $delegation['parentKey'] = $parentContext['parentKey'] ?? $delegation['parentKey'] ?? $defaultParentKey;
         $delegation['filterKey'] = $parentContext['filterKey'] ?? $delegation['filterKey'] ?? 'parent_id';
         $delegation['parentIdField'] = $parentContext['parentIdField'] ?? $delegation['parentIdField'] ?? 'id';
 
@@ -154,9 +173,9 @@ class DelegationConfigNormalizer
         return [];
     }
 
-    public static function normalizeAll(array $delegations): array
+    public static function normalizeAll(array $delegations, array $moduleConfig = []): array
     {
-        return array_map([self::class, 'normalize'], $delegations);
+        return array_map(fn (array $delegation): array => self::normalize($delegation, $moduleConfig), $delegations);
     }
 
     /**

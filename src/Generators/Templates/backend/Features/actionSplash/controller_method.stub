@@ -1,5 +1,5 @@
-    public function [[methodName]]Splash(Request $request, string $uuid)
+    public function [[methodName]]Splash(Request $request, string $[[routeKeyParam]])
     {
-        $result = [[ModuleName]][[ActionName]]SplashService::execute($uuid, $request->all());
+        $result = [[ModuleName]][[ActionName]]SplashService::execute($[[routeKeyParam]], $request->all());
         return response()->json($result, $result['code']);
     }

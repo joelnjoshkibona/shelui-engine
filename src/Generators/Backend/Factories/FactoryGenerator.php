@@ -41,11 +41,6 @@ class FactoryGenerator extends BaseGenerator
     protected array $columns;
     protected string $idType;
 
-    /** Column names auto-managed elsewhere and never emitted individually here. */
-    protected const MANAGED_COLUMNS = [
-        'id', 'uuid', 'created_at', 'updated_at', 'deleted_at',
-    ];
-
     public function __construct(string $moduleName, string $moduleGroup = 'Core', array $config = [])
     {
         parent::__construct($moduleName, $moduleGroup, $config);
@@ -68,7 +63,8 @@ class FactoryGenerator extends BaseGenerator
         }
 
         if ($this->hasCreatorUpdater()) {
-            $lines[] = "            'created_by_id' => 1,";
+            $createdByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['created'];
+            $lines[] = "            '{$createdByColumn}' => 1,";
         }
 
         $lines = array_values(array_filter($lines));
@@ -115,6 +111,37 @@ PHP;
     protected function hasCreatorUpdater(): bool
     {
         return ModuleConfigContract::hasCreatorUpdater($this->config);
+    }
+
+    /**
+     * Column names auto-managed elsewhere and never emitted individually
+     * via buildColumnLine() — 'id' (buildIdLine()), and this module's real
+     * uuid/timestamp/soft-delete column names (ModuleConfigContract's
+     * resolved names, not just the Laravel-default literals a custom-named
+     * module — this project's legacy 'created_date'/'modified_date'/
+     * 'is_deleted' convention — never actually uses). A compliant config
+     * never declares these in columns[] to begin with, so this is purely
+     * defensive, same as ModelGenerator::generateCasts()'s equivalent list.
+     *
+     * @return string[]
+     */
+    protected function managedColumnNames(): array
+    {
+        $names = ['id'];
+
+        if (ModuleConfigContract::hasUuid($this->config)) {
+            $names[] = 'uuid';
+        }
+        if (ModuleConfigContract::hasTimestamps($this->config)) {
+            $timestampColumns = ModuleConfigContract::timestampColumns($this->config);
+            $names[] = $timestampColumns['created'];
+            $names[] = $timestampColumns['updated'];
+        }
+        if (ModuleConfigContract::hasSoftDeletes($this->config)) {
+            $names[] = ModuleConfigContract::softDeleteColumn($this->config);
+        }
+
+        return $names;
     }
 
     /**
@@ -167,14 +194,17 @@ PHP;
     protected function buildColumnLine(array $column): ?string
     {
         $name = $column['name'] ?? null;
-        if ($name === null || in_array($name, self::MANAGED_COLUMNS, true)) {
+        if ($name === null || in_array($name, $this->managedColumnNames(), true)) {
             return null;
         }
 
-        // created_by_id/updated_by_id are handled separately (or, for
-        // updated_by_id, deliberately omitted — no hand-built factory sets
-        // it, since it's always nullable and irrelevant to a fresh fixture).
-        if ($name === 'created_by_id' || $name === 'updated_by_id') {
+        // created_by_id/updated_by_id (or a module.json's configured
+        // equivalent, e.g. this project's legacy created_by/modified_by) are
+        // handled separately (or, for the updated column, deliberately
+        // omitted — no hand-built factory sets it, since it's always
+        // nullable and irrelevant to a fresh fixture).
+        $auditColumns = ModuleConfigContract::creatorUpdaterColumns($this->config);
+        if ($name === $auditColumns['created'] || $name === $auditColumns['updated']) {
             return null;
         }
 

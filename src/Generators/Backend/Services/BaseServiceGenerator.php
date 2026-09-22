@@ -17,18 +17,22 @@ abstract class BaseServiceGenerator extends BaseGenerator
         // sortable/present. All three also get a frontend filter control by
         // default now — see generateFilterFields()'s matching appends.
         //
-        // shelui-engine fork: "uuid" is not universal -- a has_uuid: false module has
-        // no such column, and offering it as a filter 500s the list endpoint
-        // (`where uuid = ...` against a nonexistent column). Gated the same way every
-        // other has_uuid decision in this codebase is (ModuleConfigContract).
-        // "created_at" has the identical latent problem for has_timestamps: false /
-        // custom timestamp column names -- not fixed here, out of scope for this pass
-        // (see FORK.md), left as-is.
+        // shelui-engine fork: neither "uuid" nor "created_at" is universal --
+        // a has_uuid: false module has no such column at all (offering it as a
+        // filter 500s the list endpoint, `where uuid = ...` against a
+        // nonexistent column), and a has_timestamps: false / custom-named
+        // module has no literal 'created_at' column either. Both gated the
+        // same way every other has_X decision in this codebase is
+        // (ModuleConfigContract) -- and when timestamps ARE present under a
+        // different name, that real column name is offered instead of the
+        // Laravel default.
         $systemFields = ['id'];
         if (ModuleConfigContract::hasUuid($this->config)) {
             $systemFields[] = 'uuid';
         }
-        $systemFields[] = 'created_at';
+        if (ModuleConfigContract::hasTimestamps($this->config)) {
+            $systemFields[] = ModuleConfigContract::timestampColumns($this->config)['created'];
+        }
         $fields = $this->appendSystemFields(
             $this->collectConfiguredFilterableFields(),
             $systemFields
@@ -161,14 +165,24 @@ abstract class BaseServiceGenerator extends BaseGenerator
     protected function generateEagerLoadRelationships($feature): string
     {
         // 'creator'/'updater' are only real relationships when the model
-        // actually has created_by_id/updated_by_id columns -- appending them
+        // actually has creator/updater columns -- appending them
         // unconditionally threw a RelationNotFoundException for every module
         // without has_creator_updater. ModuleConfigContract::hasCreatorUpdater()
         // is the single sanctioned place to read this fact (see its own
         // docblock) rather than re-deriving it here.
-        $creatorUpdater = ModuleConfigContract::hasCreatorUpdater($this->config)
-            ? ["'creator'", "'updater'"]
-            : [];
+        //
+        // shelui-engine fork: a single-actor module (creatorUpdaterColumns()
+        // returns 'updated' => null) has no updater() relation on the model
+        // at all (see ModelGenerator::generateAuditRelationships()) -- eager
+        // loading it would throw the exact same RelationNotFoundException
+        // has_creator_updater already guards against.
+        $creatorUpdater = [];
+        if (ModuleConfigContract::hasCreatorUpdater($this->config)) {
+            $creatorUpdater[] = "'creator'";
+            if (ModuleConfigContract::creatorUpdaterColumns($this->config)['updated'] !== null) {
+                $creatorUpdater[] = "'updater'";
+            }
+        }
 
         // Check if custom configuration exists
         if (isset($this->config['features']['backend'][$feature]['eagerLoadRelationships'])) {
@@ -421,11 +435,15 @@ abstract class BaseServiceGenerator extends BaseGenerator
         // range instead of an exact-instant match, since the two would
         // otherwise never be equal.
         $filterFields = $this->appendDefaultFilterField($filterFields, 'id', 'ID', 'text');
-        // shelui-engine fork: gated on has_uuid -- see generateFilterableFields()'s matching fix.
+        // shelui-engine fork: gated on has_uuid/has_timestamps, and using the
+        // configured column name -- see generateFilterableFields()'s matching fix.
         if (ModuleConfigContract::hasUuid($this->config)) {
             $filterFields = $this->appendDefaultFilterField($filterFields, 'uuid', 'UUID', 'text');
         }
-        $filterFields = $this->appendDefaultFilterField($filterFields, 'created_at', 'Created At', 'date');
+        if (ModuleConfigContract::hasTimestamps($this->config)) {
+            $createdAtColumn = ModuleConfigContract::timestampColumns($this->config)['created'];
+            $filterFields = $this->appendDefaultFilterField($filterFields, $createdAtColumn, 'Created At', 'date');
+        }
 
         if (empty($filterFields)) {
             return '[]'; // Return empty if no filter fields configured
@@ -1282,14 +1300,20 @@ abstract class BaseServiceGenerator extends BaseGenerator
      * the registry has no entry for the child at all does this fall back to
      * false, preserving prior behavior for a registry that predates this fix.
      *
-     * @param string|null $auditField 'created_by_id' or 'updated_by_id', or
-     *                                 null to omit any audit column (used by
-     *                                 EditServiceGenerator's create vs.
-     *                                 update-via-updateOrCreate branches,
-     *                                 which need different columns -- see
-     *                                 generateInlineItemsSync()).
+     * @param string|null $which 'created' or 'updated', or null to omit any
+     *                            audit column (used by EditServiceGenerator's
+     *                            create vs. update-via-updateOrCreate
+     *                            branches, which need different columns --
+     *                            see generateInlineItemsSync()). The actual
+     *                            COLUMN NAME is resolved per-child via
+     *                            resolveChildAuditColumn() -- not passed in
+     *                            literally -- so a child module with its own
+     *                            creator_updater_columns override (this
+     *                            project's legacy naming) is populated
+     *                            correctly instead of always assuming
+     *                            'created_by_id'/'updated_by_id'.
      */
-    protected function buildInlineInjectArray(array $item, ?string $auditField = null): string
+    protected function buildInlineInjectArray(array $item, ?string $which = null): string
     {
         $pairs   = [];
         $pairs[] = "'{$item['parent_fk']}' => \$model->id";
@@ -1300,11 +1324,51 @@ abstract class BaseServiceGenerator extends BaseGenerator
             $pairs[] = "'{$childField}' => \$model->{$parentField}";
         }
 
-        if ($auditField !== null && $this->childHasCreatorUpdater($item)) {
-            $pairs[] = "'{$auditField}' => Auth::id()";
+        if ($which !== null) {
+            $auditColumn = $this->resolveChildAuditColumn($item, $which);
+            if ($auditColumn !== null) {
+                $pairs[] = "'{$auditColumn}' => Auth::id()";
+            }
         }
 
         return "[\n                " . implode(",\n                ", $pairs) . ",\n            ]";
+    }
+
+    /**
+     * The CHILD module's own creator/updater column name for $which
+     * ('created'|'updated'), or null when the child has no creator/updater
+     * tracking at all (childHasCreatorUpdater()) or -- for 'updated' -- the
+     * child is single-actor (its own creatorUpdaterColumns() has no
+     * updated_by column, e.g. a legacy child table that only ever recorded
+     * who created a row).
+     *
+     * Column NAME resolution mirrors childHasCreatorUpdater()'s own
+     * registry-then-fallback rule: an explicit `child_creator_updater_columns`
+     * override on the inline_items item (parallel to `child_has_creator_updater`)
+     * wins outright; otherwise the child module's own real registry config is
+     * read via ModuleConfigContract::creatorUpdaterColumns() -- a registry
+     * entry that predates that key (or carries none at all) resolves to the
+     * historical 'created_by_id'/'updated_by_id' pair, preserving prior
+     * behaviour for every inline_items declaration written before this fork.
+     */
+    protected function resolveChildAuditColumn(array $item, string $which): ?string
+    {
+        if (!$this->childHasCreatorUpdater($item)) {
+            return null;
+        }
+
+        $override = $item['child_creator_updater_columns'] ?? null;
+        if (is_array($override)) {
+            $childConfig = ['creator_updater_columns' => $override];
+        } else {
+            $childModule = $item['child_module'] ?? null;
+            $entry = $childModule !== null ? \Blutrixx\GeneratorEngine\Generators\PathManager::findModuleInRegistry($childModule) : null;
+            $childConfig = $entry !== null ? ($entry['config'] ?? $entry) : [];
+        }
+
+        $columns = ModuleConfigContract::creatorUpdaterColumns($childConfig);
+
+        return $which === 'created' ? $columns['created'] : $columns['updated'];
     }
 
     /**

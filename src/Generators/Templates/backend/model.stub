@@ -15,6 +15,7 @@ class [[ModuleName]]Model extends BaseModel
     protected $table = self::TABLE;
     [[connection]]
     [[timestamps]]
+    [[softDeleteColumnOverride]]
 
     [[constants]]
 

@@ -3,6 +3,7 @@
 namespace Blutrixx\GeneratorEngine\Generators\Backend\Services;
 
 use Blutrixx\GeneratorEngine\Helpers\BulkActionConfigNormalizer;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 
 class ListServiceGenerator extends BaseServiceGenerator
 {
@@ -12,9 +13,9 @@ class ListServiceGenerator extends BaseServiceGenerator
         if (empty($backendConfig)) {
             return false; // Feature not enabled
         }
-        
+
         $content = $this->getTemplateContent('Features/list/service', 'backend');
-        
+
         $replacements = [
             '[[filterableFields]]' => $this->generateFilterableFields(),
             '[[sortableFields]]' => $this->generateSortableFields(),
@@ -24,6 +25,7 @@ class ListServiceGenerator extends BaseServiceGenerator
             '[[filterFields]]' => $this->generateFilterFields(),
             '[[importMethods]]' => $this->generateImportMethods(),
             '[[bulkActionsArray]]' => $this->generateBulkActionsArray(),
+            '[[bulkRecordKeyColumn]]' => $this->generateBulkRecordKeyColumn(),
             '[[defaultListFiltersArray]]' => $this->generateDefaultListFiltersArray(
                 $this->config['features']['backend']['list']['default_list_filters'] ?? []
             ),
@@ -134,6 +136,27 @@ PHP;
         }
         $keys = array_map(fn($a) => "'" . addslashes($a['key']) . "'", $bulkActions);
         return '[' . implode(', ', $keys) . ']';
+    }
+
+    /**
+     * shelui-engine fork: App\Project\_Src\ListServiceTrait::processBulkAction()
+     * (the consuming app's shared bulk-action dispatcher) hardcoded 'uuid' as
+     * the record-identifier column throughout — a has_uuid: false module (this
+     * project's legacy-repointed tables) has no such column, so every bulk
+     * action (mode=ids intersection, mode=filter id collection, and the
+     * per-id dispatch to the named action service) queried/passed a column
+     * that doesn't exist. The trait now reads this property (falling back to
+     * 'uuid' via getStaticProperty()'s own default when absent), so only a
+     * has_uuid: false module needs to declare it at all — every module
+     * generated before this existed keeps generating a byte-identical file.
+     */
+    private function generateBulkRecordKeyColumn(): string
+    {
+        if (ModuleConfigContract::hasUuid($this->config)) {
+            return '';
+        }
+
+        return "\n    protected static string \$bulkRecordKeyColumn = 'id';";
     }
 
     private function generateDefaultListFiltersArray(array $entries): string

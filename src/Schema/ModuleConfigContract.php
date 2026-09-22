@@ -125,6 +125,148 @@ final class ModuleConfigContract
     }
 
     /**
+     * The migration/model column names backing `$table->timestamps()` for
+     * this module: `{created: string, updated: string}`. Only meaningful
+     * when hasTimestamps() is true.
+     *
+     * Defaults to Laravel's own 'created_at' / 'updated_at' pair, unchanged
+     * for any module that doesn't override — every module generated before
+     * this accessor existed keeps generating exactly what it generated
+     * before. A module mapped onto a pre-existing table with differently
+     * named columns (this project's legacy tables use 'created_date' /
+     * 'modified_date') overrides via `timestamp_columns` in module.json:
+     *   "timestamp_columns": { "created_at": "created_date", "updated_at": "modified_date" }
+     *
+     * shelui-engine fork: replaces the ad-hoc, hardcoded 'created_date'/
+     * 'modified_date' rescan that used to live only in ModelGenerator
+     * (and nowhere else — MigrationGenerator/BaseServiceGenerator never knew
+     * about it at all, so a legacy-named module's migration and filters
+     * still assumed 'created_at'/'updated_at'). One resolution rule, shared
+     * by every generator that touches these columns.
+     *
+     * @return array{created: string, updated: string}
+     * @throws \InvalidArgumentException when `timestamp_columns` is present
+     *         but not shaped as documented.
+     */
+    public static function timestampColumns(array $config): array
+    {
+        $override = $config['timestamp_columns'] ?? [];
+        if (!is_array($override)) {
+            throw new \InvalidArgumentException('timestamp_columns must be an array shaped {"created_at": string, "updated_at": string}.');
+        }
+
+        $created = $override['created_at'] ?? 'created_at';
+        $updated = $override['updated_at'] ?? 'updated_at';
+
+        if (!is_string($created) || $created === '' || !is_string($updated) || $updated === '') {
+            throw new \InvalidArgumentException('timestamp_columns.created_at and timestamp_columns.updated_at must both be non-empty strings.');
+        }
+
+        return ['created' => $created, 'updated' => $updated];
+    }
+
+    /** The only values softDeleteType() may return. */
+    private const VALID_SOFT_DELETE_TYPES = ['timestamp', 'flag'];
+
+    /**
+     * How this module implements soft deletes, when hasSoftDeletes() is
+     * true:
+     *   - 'timestamp' (default): Laravel's own nullable `deleted_at`
+     *     column, model `use SoftDeletes`. Column NAME can still differ
+     *     from 'deleted_at' — see softDeleteColumn().
+     *   - 'flag': an integer flag column (0 = active, 1 = deleted) — this
+     *     project's legacy convention, ported from ongeza-pro as
+     *     `App\Project\_Src\Traits\HasIsDeleted` in the consuming app.
+     *     ModelGenerator uses this trait instead of Laravel's own
+     *     SoftDeletes for a 'flag' module.
+     *
+     * Declared via `"soft_delete_type": "flag"` in module.json. Defaults to
+     * 'timestamp', unchanged for any module that doesn't override — this
+     * project's own `permission_group` table genuinely has a real
+     * `deleted_at` column and stays on the default.
+     *
+     * @throws \InvalidArgumentException when `soft_delete_type` is present
+     *         but not one of the two values above.
+     */
+    public static function softDeleteType(array $config): string
+    {
+        $type = $config['soft_delete_type'] ?? 'timestamp';
+        if (!in_array($type, self::VALID_SOFT_DELETE_TYPES, true)) {
+            throw new \InvalidArgumentException(
+                'soft_delete_type must be one of: ' . implode(', ', self::VALID_SOFT_DELETE_TYPES)
+            );
+        }
+
+        return $type;
+    }
+
+    /**
+     * The actual column name backing soft deletes, when hasSoftDeletes() is
+     * true. Defaults to 'deleted_at' for softDeleteType() 'timestamp' and
+     * 'is_deleted' for 'flag' — this project's own real 'flag' tables are
+     * all spelled 'is_deleted', which is why that (not 'deleted_at') is the
+     * 'flag' default rather than requiring every such module to repeat
+     * itself. Override either default via `"soft_delete_column": "..."` in
+     * module.json.
+     *
+     * @throws \InvalidArgumentException when `soft_delete_column` is
+     *         present but not a non-empty string.
+     */
+    public static function softDeleteColumn(array $config): string
+    {
+        $default = self::softDeleteType($config) === 'flag' ? 'is_deleted' : 'deleted_at';
+        $column = $config['soft_delete_column'] ?? $default;
+
+        if (!is_string($column) || $column === '') {
+            throw new \InvalidArgumentException('soft_delete_column must be a non-empty string.');
+        }
+
+        return $column;
+    }
+
+    /**
+     * The migration/model column names backing creator/updater audit
+     * tracking for this module, when hasCreatorUpdater() is true:
+     *   `{created: string, updated: string|null}`
+     * `updated` is `null` for a single-actor module that only tracks who
+     * CREATED a row, never who last touched it — this project's legacy
+     * convention has tables with only `created_by`, no paired `modified_by`.
+     * A caller that populates or relates the updater column (ModelGenerator's
+     * updater() relation, EditServiceGenerator's actor assignment) must
+     * treat `null` here as "there is no such column", not as "use the
+     * default name".
+     *
+     * Defaults to the generator's own historical pair, 'created_by_id' /
+     * 'updated_by_id', unchanged for any module that doesn't override.
+     * Override via module.json:
+     *   "creator_updater_columns": { "created_by": "created_by", "updated_by": "modified_by" }
+     *   "creator_updater_columns": { "created_by": "created_by", "updated_by": null }
+     *
+     * @return array{created: string, updated: string|null}
+     * @throws \InvalidArgumentException when `creator_updater_columns` is
+     *         present but not shaped as documented.
+     */
+    public static function creatorUpdaterColumns(array $config): array
+    {
+        $override = $config['creator_updater_columns'] ?? [];
+        if (!is_array($override)) {
+            throw new \InvalidArgumentException('creator_updater_columns must be an array shaped {"created_by": string, "updated_by": string|null}.');
+        }
+
+        $created = array_key_exists('created_by', $override) ? $override['created_by'] : 'created_by_id';
+        $updated = array_key_exists('updated_by', $override) ? $override['updated_by'] : 'updated_by_id';
+
+        if (!is_string($created) || $created === '') {
+            throw new \InvalidArgumentException('creator_updater_columns.created_by must be a non-empty string.');
+        }
+        if ($updated !== null && (!is_string($updated) || $updated === '')) {
+            throw new \InvalidArgumentException('creator_updater_columns.updated_by must be a non-empty string or null.');
+        }
+
+        return ['created' => $created, 'updated' => $updated];
+    }
+
+    /**
      * Whether this module's Model.php is hand-maintained and must never be
      * touched by generation, regardless of --force.
      *

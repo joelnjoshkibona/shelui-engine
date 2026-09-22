@@ -1,1 +1,1 @@
-Route::middleware(['auth:sanctum', 'permission:[[permission]]'])->get('/[[moduleRoute]]/{uuid}/[[actionRoute]]/splash', [[[ModuleName]]Controller::class, '[[methodName]]Splash']);
+Route::middleware(['auth:sanctum', 'permission:[[permission]]'])->get('/[[moduleRoute]]/{[[routeKeyParam]]}/[[actionRoute]]/splash', [[[ModuleName]]Controller::class, '[[methodName]]Splash']);

@@ -8,19 +8,19 @@ use App\Project\_Src\ApplicationException;
 /**
  * Splash data for the "[[actionLabel]]" action.
  *
- * Answers GET /[[moduleRoute]]/{uuid}/[[actionRoute]]/splash — everything the action's form needs to
+ * Answers GET /[[moduleRoute]]/{[[routeKeyParam]]}/[[actionRoute]]/splash — everything the action's form needs to
  * render before the user has entered anything: option lists, defaults, values derived from the
- * record being acted on. The record's uuid is passed, unlike create's splash, because an action
+ * record being acted on. The record's [[routeKeyParam]] is passed, unlike create's splash, because an action
  * always operates on an existing row and its choices usually depend on that row's state.
  *
  * Write-once: filled in by hand and never regenerated, exactly like the action's own Service.
  */
 class [[ModuleName]][[ActionName]]SplashService
 {
-    public static function execute(string $uuid, array $data = [])
+    public static function execute(string $[[routeKeyParam]], array $data = [])
     {
         try {
-            return self::process($uuid, $data);
+            return self::process($[[routeKeyParam]], $data);
         } catch (ApplicationException $e) {
             return Helpers::error($e->getMessage(), 422, $e->getData());
         } catch (\Exception $e) {
@@ -28,7 +28,7 @@ class [[ModuleName]][[ActionName]]SplashService
         }
     }
 
-    public static function process(string $uuid, array $data = []): array
+    public static function process(string $[[routeKeyParam]], array $data = []): array
     {
         $splashData = [
             [[splashData]]

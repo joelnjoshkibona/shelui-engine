@@ -1129,7 +1129,6 @@ abstract class WidgetsTestCase extends TestCase
     protected function createWidgetFixture(array \$overrides = []): WidgetsModel
     {
         return WidgetsModel::create(array_merge([
-            'created_by_id' => UsersModel::DEVELOPER,
         ], \$overrides))->fresh();
     }
 
@@ -1499,7 +1498,7 @@ PHP;
         $this->assertMethodBodyContains(
             $content,
             'test_soft_deleted_location_type_is_excluded_from_location_types_list',
-            'assertFalse($uuids->contains($fixture->uuid));'
+            'assertFalse($recordKeys->contains($fixture->uuid));'
         );
     }
 

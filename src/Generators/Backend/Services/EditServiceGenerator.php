@@ -2,6 +2,8 @@
 
 namespace Blutrixx\GeneratorEngine\Generators\Backend\Services;
 
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
+
 class EditServiceGenerator extends BaseServiceGenerator
 {
     public function generate(): bool
@@ -38,6 +40,7 @@ class EditServiceGenerator extends BaseServiceGenerator
         $replacements = [
             '[[validationRules]]'    => $this->generateValidationRules(true),
             '[[validationMessages]]' => $this->generateValidationMessages(true),
+            '[[updatedByAssignment]]' => $this->generateUpdatedByAssignment(),
             '[[beforeUpdate]]'       => $beforeUpdate,
             '[[afterUpdate]]'        => $afterUpdate,
             '[[inlineItemsExtract]]' => $this->generateInlineItemsExtract(),
@@ -50,6 +53,28 @@ class EditServiceGenerator extends BaseServiceGenerator
         $filePath = "{$this->modulePath}/Services/{$serviceName}.php";
 
         return $this->writeFile($filePath, $content);
+    }
+
+    /**
+     * shelui-engine fork: mirrors CreateServiceGenerator::
+     * generateCreatedByAssignment() — column name from
+     * ModuleConfigContract::creatorUpdaterColumns(), and emits nothing at
+     * all for a single-actor module (creator-only, no updated_by column —
+     * assigning to a nonexistent column here would either 500 or be
+     * silently dropped depending on the app's mass-assignment strictness).
+     */
+    private function generateUpdatedByAssignment(): string
+    {
+        if (!ModuleConfigContract::hasCreatorUpdater($this->config)) {
+            return '';
+        }
+
+        $column = ModuleConfigContract::creatorUpdaterColumns($this->config)['updated'];
+        if ($column === null) {
+            return '';
+        }
+
+        return "\$validData['{$column}'] = Auth::id();";
     }
 
     private function generateInlineItemsSync(): string
@@ -70,8 +95,8 @@ class EditServiceGenerator extends BaseServiceGenerator
             // updated needs updated_by_id -- sharing one array would
             // silently overwrite created_by_id on every edit of an
             // already-existing child row.
-            $createInject = $this->buildInlineInjectArray($item, 'created_by_id');
-            $updateInject = $this->buildInlineInjectArray($item, 'updated_by_id');
+            $createInject = $this->buildInlineInjectArray($item, 'created');
+            $updateInject = $this->buildInlineInjectArray($item, 'updated');
 
             // A uuid in the payload names a row of THIS parent only. This used to be
             // `updateOrCreate(['uuid' => $_uuid], [... parent_fk => $model->id])`, which matched on the

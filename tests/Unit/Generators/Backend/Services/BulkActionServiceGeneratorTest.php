@@ -156,6 +156,50 @@ class BulkActionServiceGeneratorTest extends TestCase
     }
 
     /**
+     * shelui-engine fork: the record-identifier key ('uuid' vs 'id') must
+     * match whatever key App\Project\_Src\ListServiceTrait::processBulkAction()
+     * actually dispatches under (ListServiceGenerator::generateBulkRecordKeyColumn()) --
+     * a has_uuid: false module's generated action service used to query
+     * `where('uuid', $params['uuid'])`, a column the table doesn't have.
+     */
+    public function test_status_target_action_uses_id_when_has_uuid_is_false(): void
+    {
+        $generator = new BulkActionServiceGenerator('PurchaseOrders', 'Core', [
+            'table_name' => 'purchase_orders',
+            'has_uuid' => false,
+            'features' => ['backend' => ['list' => [
+                'bulk_actions' => [
+                    ['key' => 'markReceived', 'label' => 'Mark Received', 'status_target' => 'RECEIVED'],
+                ],
+            ]]],
+        ]);
+
+        $generator->generate();
+        $content = (string) file_get_contents($this->servicePath('MarkReceived'));
+
+        $this->assertStringContainsString("PurchaseOrdersModel::where('id', \$params['id'])->first();", $content);
+        $this->assertStringNotContainsString('uuid', $content);
+    }
+
+    public function test_generic_action_uses_id_when_has_uuid_is_false(): void
+    {
+        $generator = new BulkActionServiceGenerator('PurchaseOrders', 'Core', [
+            'table_name' => 'purchase_orders',
+            'has_uuid' => false,
+            'features' => ['backend' => ['list' => [
+                'bulk_actions' => [['key' => 'archive', 'label' => 'Archive']],
+            ]]],
+        ]);
+
+        $generator->generate();
+        $content = (string) file_get_contents($this->servicePath('Archive'));
+
+        $this->assertStringContainsString("\$id = \$params['id'] ?? null;", $content);
+        $this->assertStringContainsString("PurchaseOrdersModel::where('id', \$id)->firstOrFail();", $content);
+        $this->assertStringNotContainsString('uuid', $content);
+    }
+
+    /**
      * The behavior this generator now delegates to BulkActionConfigNormalizer
      * instead of hand-rolling: an entry with no `key` (or an explicitly
      * empty one) is dropped rather than producing a nonsensically-named

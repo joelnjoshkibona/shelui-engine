@@ -62,7 +62,7 @@ class RoutesGenerator extends BaseGenerator
         // edit/delete route was silently registered as POST. The incremental
         // make:delegation path (addDelegationRoute()) was already unaffected
         // because MakeDelegation.php normalizes before calling it.
-        $this->delegations = DelegationConfigNormalizer::normalizeAll($config['delegations'] ?? []);
+        $this->delegations = DelegationConfigNormalizer::normalizeAll($config['delegations'] ?? [], $config);
         $this->actions = $config['actions'] ?? [];
     }
 
@@ -611,7 +611,14 @@ class RoutesGenerator extends BaseGenerator
         $delegationName = $delegation['name'] ?? $delegationKey;
         $delegationRoute = Str::kebab($delegationName);
         $delegationStudly = Str::studly($delegationName);
-        $parentKey = $delegation['parentKey'] ?? 'uuid';
+        // shelui-engine fork: was hardcoded 'uuid' regardless of has_uuid --
+        // a has_uuid: false module's delegation routes (e.g. a related-record
+        // tab on a legacy-repointed module) 404'd against a parent {uuid}
+        // segment the route never actually receives. Mirrors the
+        // [[routeKeyParam]] default every standard CRUD route already uses
+        // (BaseGenerator::replacePlaceholders()); an explicit parentKey
+        // override in module.json still always wins.
+        $parentKey = $delegation['parentKey'] ?? (ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id');
         $operations = $delegation['operations'] ?? [];
         // Permissions reuse the RELATED module's own permission (e.g.
         // "StockMovements.edit"), not a delegation-specific one — see
@@ -794,10 +801,13 @@ class RoutesGenerator extends BaseGenerator
         // row's state — unlike create's splash, which has no record yet. Permission is the action's
         // own, so anyone who may run it may load its form.
         if (!empty($action['splash'])) {
+            // shelui-engine fork: was hardcoded {uuid} -- see the parentKey
+            // fix above in generateDelegationRoutes() for the identical bug.
+            $splashRouteKeyParam = ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id';
             $splashPermission = "{$this->moduleName}." . lcfirst($actionStudly);
             $splashMethod = lcfirst($baseMethod);
             $routes .= "Route::middleware(['auth:sanctum', 'permission:{$splashPermission}'])"
-                . "->get('/{$moduleRoute}/{uuid}/{$actionRoute}/splash', "
+                . "->get('/{$moduleRoute}/{{$splashRouteKeyParam}}/{$actionRoute}/splash', "
                 . "[{$this->moduleName}Controller::class, '{$splashMethod}Splash']);\n";
         }
 

@@ -324,11 +324,14 @@ class MigrationGenerator extends BaseGenerator
             $systemIndexColumnSets[] = ['uuid'];
         }
         if ($this->hasCreatorUpdater()) {
-            $systemIndexColumnSets[] = ['created_by_id'];
-            $systemIndexColumnSets[] = ['updated_by_id'];
+            $auditColumns = ModuleConfigContract::creatorUpdaterColumns($this->config);
+            $systemIndexColumnSets[] = [$auditColumns['created']];
+            if ($auditColumns['updated'] !== null) {
+                $systemIndexColumnSets[] = [$auditColumns['updated']];
+            }
         }
         if ($this->hasSoftDeletes()) {
-            $systemIndexColumnSets[] = ['deleted_at'];
+            $systemIndexColumnSets[] = [ModuleConfigContract::softDeleteColumn($this->config)];
         }
         foreach ($this->config['morphs'] ?? [] as $morph) {
             if (!empty($morph['type_column']) && !empty($morph['id_column'])) {
@@ -399,11 +402,18 @@ class MigrationGenerator extends BaseGenerator
             return '';
         }
 
-        // Audit fields use foreignId() for proper FK semantics
-        $auditFields = [
-            '$table->foreignId(\'created_by_id\');',
-            '$table->foreignId(\'updated_by_id\')->nullable();'
-        ];
+        // Audit fields use foreignId() for proper FK semantics. Column names
+        // come from ModuleConfigContract::creatorUpdaterColumns() — the
+        // historical 'created_by_id'/'updated_by_id' pair by default, or a
+        // module.json override (e.g. this project's legacy 'created_by'/
+        // 'modified_by' naming). A single-actor module (creatorUpdaterColumns()
+        // returns 'updated' => null) gets only the creator column.
+        $columns = ModuleConfigContract::creatorUpdaterColumns($this->config);
+
+        $auditFields = ["\$table->foreignId('{$columns['created']}');"];
+        if ($columns['updated'] !== null) {
+            $auditFields[] = "\$table->foreignId('{$columns['updated']}')->nullable();";
+        }
 
         return "\n            " . implode("\n            ", $auditFields);
     }
@@ -457,14 +467,55 @@ class MigrationGenerator extends BaseGenerator
         return ModuleConfigContract::hasCreatorUpdater($this->config);
     }
 
+    /**
+     * shelui-engine fork: column NAMES are configurable via
+     * ModuleConfigContract::timestampColumns() (module.json's
+     * `timestamp_columns`) — a module mapped onto a pre-existing table with
+     * differently named columns (this project's legacy 'created_date'/
+     * 'modified_date') still gets real, Eloquent-managed timestamps, not
+     * plain string columns the app has to populate itself. The Laravel
+     * default pair still emits the familiar `$table->timestamps();` call
+     * rather than two spelled-out `$table->timestamp()` calls, so every
+     * module generated before this accessor existed produces byte-identical
+     * output.
+     */
     protected function generateTimestampsLine(): string
     {
-        return $this->hasTimestamps() ? '$table->timestamps();' : '';
+        if (!$this->hasTimestamps()) {
+            return '';
+        }
+
+        $columns = ModuleConfigContract::timestampColumns($this->config);
+        if ($columns['created'] === 'created_at' && $columns['updated'] === 'updated_at') {
+            return '$table->timestamps();';
+        }
+
+        return "\$table->timestamp('{$columns['created']}')->nullable();\n            \$table->timestamp('{$columns['updated']}')->nullable();";
     }
 
+    /**
+     * shelui-engine fork: ModuleConfigContract::softDeleteType() picks
+     * between Laravel's own nullable `deleted_at` timestamp (default) and
+     * this project's legacy integer flag convention ('flag' — see
+     * App\Project\_Src\Traits\HasIsDeleted, which ModelGenerator wires up
+     * for the matching trait choice). softDeleteColumn() supplies the
+     * column NAME either way, so `$table->softDeletes()` still emits for
+     * the untouched default case and only spells out a custom name
+     * (`$table->softDeletes('...')`) when one was configured.
+     */
     protected function generateSoftDeletesLine(): string
     {
-        return $this->hasSoftDeletes() ? '$table->softDeletes();' : '';
+        if (!$this->hasSoftDeletes()) {
+            return '';
+        }
+
+        $column = ModuleConfigContract::softDeleteColumn($this->config);
+
+        if (ModuleConfigContract::softDeleteType($this->config) === 'flag') {
+            return "\$table->boolean('{$column}')->default(false);";
+        }
+
+        return $column === 'deleted_at' ? '$table->softDeletes();' : "\$table->softDeletes('{$column}');";
     }
 
     protected function generateUuidLine(): string
@@ -489,11 +540,15 @@ class MigrationGenerator extends BaseGenerator
             $lines[] = "\$table->index(['uuid'], 'idx_{$this->tableName}_uuid');";
         }
         if ($this->hasCreatorUpdater()) {
-            $lines[] = "\$table->index(['created_by_id'], 'idx_{$this->tableName}_created_by_id');";
-            $lines[] = "\$table->index(['updated_by_id'], 'idx_{$this->tableName}_updated_by_id');";
+            $auditColumns = ModuleConfigContract::creatorUpdaterColumns($this->config);
+            $lines[] = "\$table->index(['{$auditColumns['created']}'], 'idx_{$this->tableName}_{$auditColumns['created']}');";
+            if ($auditColumns['updated'] !== null) {
+                $lines[] = "\$table->index(['{$auditColumns['updated']}'], 'idx_{$this->tableName}_{$auditColumns['updated']}');";
+            }
         }
         if ($this->hasSoftDeletes()) {
-            $lines[] = "\$table->index(['deleted_at'], 'idx_{$this->tableName}_deleted_at');";
+            $softDeleteColumn = ModuleConfigContract::softDeleteColumn($this->config);
+            $lines[] = "\$table->index(['{$softDeleteColumn}'], 'idx_{$this->tableName}_{$softDeleteColumn}');";
         }
 
         if (empty($lines)) {
