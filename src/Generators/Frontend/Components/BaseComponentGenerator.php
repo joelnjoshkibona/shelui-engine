@@ -5,6 +5,7 @@ namespace Blutrixx\GeneratorEngine\Generators\Frontend\Components;
 use Blutrixx\GeneratorEngine\Generators\BaseGenerator;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
 use Blutrixx\GeneratorEngine\Helpers\BulkActionConfigNormalizer;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 use Illuminate\Support\Str;
 
 abstract class BaseComponentGenerator extends BaseGenerator
@@ -12,6 +13,27 @@ abstract class BaseComponentGenerator extends BaseGenerator
     protected function getModulePath(): string
     {
         return PathManager::getFrontendModulePath($this->moduleGroup, $this->moduleName);
+    }
+
+    /**
+     * shelui-engine fork: this module's own record-identifier route-param/
+     * prop name -- 'uuid' when ModuleConfigContract::hasUuid(), else 'id'.
+     * `features.frontend.view.idParam` (a pre-fork escape hatch already used
+     * by FrontendRoutesGenerator/ViewLayoutGenerator/ViewHistoryGenerator)
+     * still always wins when explicitly set; this is only the smart default
+     * it falls back to instead of the literal 'uuid' every one of those
+     * previously hardcoded independently. The single shared resolution
+     * point every Frontend component generator (they all extend this class)
+     * should call instead of recomputing its own copy -- mirrors
+     * ModuleConfigContract's own "one place, not N independently-derived
+     * copies" rationale, and FrontendRoutesGenerator::$idParam (the
+     * identical constructor-time property on the one Frontend generator
+     * that does NOT extend this class).
+     */
+    protected function idParam(): string
+    {
+        return $this->config['features']['frontend']['view']['idParam']
+            ?? (ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id');
     }
 
     /**
@@ -630,8 +652,18 @@ abstract class BaseComponentGenerator extends BaseGenerator
         $submitVIf = $isWizard ? ' v-else' : '';
 
         if ($formType === 'edit') {
+            // shelui-engine fork: this module's own record-identifier prop --
+            // 'uuid' when ModuleConfigContract::hasUuid(), else 'id' (see
+            // idParam()'s docblock above). The "open full page" link reads
+            // the loaded record's own id back out of the EditForm's props
+            // (declared in features/edit/form.stub, which resolves the SAME
+            // prop name), so it must be the resolved idParam here too --
+            // this previously hardcoded the literal `uuid` JS identifier
+            // regardless of what the stub actually declared/exposed.
+            $idParam = $this->idParam();
+
             return "<div class=\"flex items-center justify-between px-4 py-3 border-t shrink-0\">\n"
-                 . "\t\t\t<router-link v-if=\"modal\" :to=\"`/{$moduleRoute}/\${uuid}/edit`\">\n"
+                 . "\t\t\t<router-link v-if=\"modal\" :to=\"`/{$moduleRoute}/\${{$idParam}}/edit`\">\n"
                  . "\t\t\t\t<Button type=\"button\" variant=\"ghost\" size=\"sm\" class=\"text-muted-foreground\">\n"
                  . "\t\t\t\t\t<component :is=\"icons['ExternalLinkIcon']\" class=\"h-3.5 w-3.5 mr-1.5\" />\n"
                  . "\t\t\t\t\t{{ \$t('entity.open_full') }}\n"
@@ -3802,7 +3834,13 @@ import { useDraft } from '@/composables/useDraft';
 import DraftRestoreBanner from '@/components/DraftRestoreBanner.vue';
 TS;
 
-        $useDraftCall = "useDraft('{$this->moduleName}', '{$this->moduleGroup}', 'edit', props.uuid)";
+        // shelui-engine fork: the draft's record key is THIS module's own
+        // record identifier prop -- 'uuid' when ModuleConfigContract::hasUuid(),
+        // else 'id' (see idParam()'s docblock above), not the literal 'uuid'
+        // this previously always read off props regardless of what the
+        // EditForm actually declares (features/edit/form.stub resolves the
+        // SAME prop name).
+        $useDraftCall = "useDraft('{$this->moduleName}', '{$this->moduleGroup}', 'edit', props.{$this->idParam()})";
 
         $draftSetupBlock = <<<TS
 // Draft autosave -- server-backed, generic Core/Drafts substrate.

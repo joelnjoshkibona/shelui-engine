@@ -118,6 +118,19 @@ class CreateFormGenerator extends BaseComponentGenerator
             $wizardStateBlock = "const confirmed = ref(false)\n";
         }
 
+        // shelui-engine fork: this module's own record-identifier field name
+        // on the freshly-created record -- 'uuid' when
+        // ModuleConfigContract::hasUuid(), else 'id' (see
+        // BaseComponentGenerator::idParam()'s docblock). create/form.stub's
+        // handleCreated() used to read response.data.uuid unconditionally to
+        // build the post-create redirect (`/{route}/${uuid}/details`) -- for
+        // a has_uuid: false module the create response never has a `uuid`
+        // key at all, so that read was always undefined and the redirect
+        // silently fell back to cancelLink instead of opening the new
+        // record's own details page (the route FrontendRoutesGenerator
+        // actually registers for such a module is `:id/details`).
+        $idParam = $this->idParam();
+
         // Conditional switching: only forms with a file-input field ever get
         // the FormData/sendFormDataRequest treatment -- everything else is
         // generated exactly as before (see generateRequestImportLine() /
@@ -208,6 +221,7 @@ class CreateFormGenerator extends BaseComponentGenerator
             '[[inlineItemsFieldDefs]]' => $this->generateInlineItemsFieldDefs($inlineItems),
             '[[confirmCheckboxBlock]]' => $confirmCheckboxBlock,
             '[[viewEnabledForCreateRedirect]]' => $viewEnabledForCreateRedirect,
+            '[[idParam]]'              => $idParam,
             '[[requestImportLine]]'    => $requestImportLine,
             '[[fileRefsBlock]]'        => $fileRefsBlock,
             '[[submitCall]]'           => $submitCall,

@@ -20,7 +20,7 @@ const { t } = useI18n();
 
 const props = defineProps({
 	modal: { type: Boolean, default: false },
-	uuid: { type: String, required: true },
+	[[idParam]]: { type: String, required: true },
 	cancelLink: { default: '/[[moduleRoute]]/list' },
 	// Mirrors Create/EditForm's existing submitUrl override pattern —
 	// null means "use this module's own default endpoint", same as every
@@ -39,8 +39,8 @@ const router = useRouter()
 const { hasPermission } = usePermissions()
 
 // Computed endpoints with fallbacks — mirrors Create/EditForm's existing pattern.
-const checkEndpoint = computed(() => props.checkUrl || `/[[moduleRoute]]/${props.uuid}/delete/check`)
-const submitEndpoint = computed(() => props.submitUrl || `/[[moduleRoute]]/${props.uuid}/delete`)
+const checkEndpoint = computed(() => props.checkUrl || `/[[moduleRoute]]/${props.[[idParam]]}/delete/check`)
+const submitEndpoint = computed(() => props.submitUrl || `/[[moduleRoute]]/${props.[[idParam]]}/delete`)
 
 // State
 const isLoading = ref(true)
@@ -188,7 +188,7 @@ onMounted(() => {
 
 		</div>
 		<div class="flex items-center justify-between px-4 py-3 border-t">
-			<router-link v-if="modal" :to="`/[[moduleRoute]]/${uuid}/delete`">
+			<router-link v-if="modal" :to="`/[[moduleRoute]]/${[[idParam]]}/delete`">
 				<Button type="button" variant="ghost" size="sm" class="text-muted-foreground">
 					<ExternalLinkIcon class="h-3.5 w-3.5 mr-1.5" />
 					{{ $t('entity.open_full') }}

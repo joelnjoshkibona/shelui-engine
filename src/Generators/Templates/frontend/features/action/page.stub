@@ -11,7 +11,7 @@
 				modal renders with `modal` instead. Nothing here needs editing
 				when you add fields — edit the Form.
 			-->
-			<[[ModuleName]][[ActionName]]Form :uuid="uuid" :cancel-link="backLink" />
+			<[[ModuleName]][[ActionName]]Form :[[idParam]]="uuid" :cancel-link="backLink" />
 		</div>
 	</MainLayout>
 </template>
@@ -24,7 +24,13 @@ import [[ModuleName]][[ActionName]]Form from './Components/[[ModuleName]][[Actio
 
 const route = useRoute()
 
-const uuid = computed(() => String(route.params.uuid ?? ''))
+// shelui-engine fork: route.params.[[idParam]], not a hardcoded
+// route.params.uuid -- this route is registered with an `:id` segment
+// instead of `:uuid` for a has_uuid: false module
+// (FrontendRoutesGenerator::generateActionRoutes()); the local variable
+// stays named `uuid` (cosmetic -- see BaseComponentGenerator::idParam()'s
+// docblock), only its value source changes.
+const uuid = computed(() => String(route.params.[[idParam]] ?? ''))
 
 const backLink = computed(() => {
 	return (route.query.back as string) || '[[actionCancelLink]]'

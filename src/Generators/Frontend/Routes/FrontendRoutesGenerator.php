@@ -5,12 +5,29 @@ namespace Blutrixx\GeneratorEngine\Generators\Frontend\Routes;
 use Blutrixx\GeneratorEngine\Generators\BaseGenerator;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
 use Blutrixx\GeneratorEngine\Helpers\DelegationConfigNormalizer;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 use Illuminate\Support\Str;
 
 class FrontendRoutesGenerator extends BaseGenerator
 {
     protected array $features;
     protected array $customFeatures;
+
+    /**
+     * shelui-engine fork: this module's own record-identifier route-param
+     * name -- 'uuid' when ModuleConfigContract::hasUuid(), else 'id'.
+     * `features.frontend.view.idParam` (an existing, pre-fork escape hatch)
+     * still always wins when explicitly set; this only changes what it
+     * falls back to when absent, matching the backend's [[routeKeyParam]]
+     * default (BaseGenerator::replacePlaceholders()) for the same config.
+     * Computed once and threaded through every route this generator emits,
+     * rather than re-derived (and inconsistently applied) per block --
+     * see the fix in generate()/generateActionRoutes()/
+     * generateCustomFeatureRoutes() for the bug this closes: the delete
+     * route and action-page routes hardcoded the literal 'uuid' segment
+     * even when edit/view had already resolved a different idParam.
+     */
+    protected string $idParam;
 
     public function __construct(string $moduleName, string $moduleGroup = 'Core', array $config = [])
     {
@@ -27,6 +44,9 @@ class FrontendRoutesGenerator extends BaseGenerator
         $this->features = array_unique($this->features);
 
         $this->customFeatures = $config['delegations'] ?? [];
+
+        $this->idParam = $frontendFeatures['view']['idParam']
+            ?? (ModuleConfigContract::hasUuid($config) ? 'uuid' : 'id');
     }
 
     public function generate(): bool
@@ -78,10 +98,9 @@ export const {$this->moduleName}Routes: RouteRecordRaw[] = [";
 
         // Generate edit route
         if (in_array('edit', $this->features)) {
-            $idParam = $this->config['features']['frontend']['view']['idParam'] ?? 'uuid';
             $content .= "
 \t{
-\t\tpath: '/{$moduleRoute}/:{$idParam}/edit',
+\t\tpath: '/{$moduleRoute}/:{$this->idParam}/edit',
 \t\tname: '{$moduleRoute}-edit',
 \t\tcomponent: () => import('./{$this->moduleName}EditPage.vue'),
 \t\tmeta: {
@@ -96,7 +115,7 @@ export const {$this->moduleName}Routes: RouteRecordRaw[] = [";
         if (in_array('delete', $this->features)) {
             $content .= "
 \t{
-\t\tpath: '/{$moduleRoute}/:uuid/delete',
+\t\tpath: '/{$moduleRoute}/:{$this->idParam}/delete',
 \t\tname: '{$moduleRoute}-delete',
 \t\tcomponent: () => import('./{$this->moduleName}DeletePage.vue'),
 \t\tmeta: {
@@ -110,7 +129,7 @@ export const {$this->moduleName}Routes: RouteRecordRaw[] = [";
 
         // Generate view/details route with children
         if (in_array('view', $this->features)) {
-            $idParam = $this->config['features']['frontend']['view']['idParam'] ?? 'uuid';
+            $idParam = $this->idParam;
 
             $content .= "
 \t{
@@ -235,7 +254,7 @@ export const {$this->moduleName}ModuleConfig: EntityModuleConfig = {
             // 'path')", taking down the whole SPA including /login.
             $content .= "
 \t{
-\t\tpath: '/{$moduleRoute}/:uuid/{$kebab}',
+\t\tpath: '/{$moduleRoute}/:{$this->idParam}/{$kebab}',
 \t\tname: '{$moduleRoute}-{$kebab}',
 \t\tcomponent: () => import('./{$this->moduleName}{$studly}Page.vue'),
 \t\tmeta: {
@@ -256,7 +275,6 @@ export const {$this->moduleName}ModuleConfig: EntityModuleConfig = {
             $moduleRoute = Str::kebab($this->moduleName);
         }
         $routes = '';
-        $idParam = $this->config['features']['frontend']['view']['idParam'] ?? 'uuid';
 
         foreach ($this->customFeatures as $featureKey => $customFeature) {
             // Only tab delegations generate frontend routes (they appear as tabs in details view)

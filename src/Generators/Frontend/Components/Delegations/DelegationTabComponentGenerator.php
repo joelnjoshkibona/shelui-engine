@@ -57,7 +57,14 @@ class DelegationTabComponentGenerator extends BaseComponentGenerator
             'label' => $delegation['label'] ?? '',
             'displayType' => 'tab-action',
             'relatedModule' => $delegation['relatedModule'] ?? null,
-            'parentKey' => $delegation['parentKey'] ?? 'uuid',
+            // shelui-engine fork: this is the DELEGATING (parent) module's own
+            // record-identifier key -- 'uuid' when ModuleConfigContract::hasUuid(),
+            // else 'id' (see BaseComponentGenerator::idParam()'s docblock).
+            // Mirrors the backend's already-fixed DelegationConfigNormalizer::
+            // normalize()/RoutesGenerator's own parentKey default fix. The
+            // RELATED/child item's own key is a separate, deferred question
+            // (see CustomFeatureTabComponentGenerator's docblock).
+            'parentKey' => $delegation['parentKey'] ?? $this->idParam(),
             'filterKey' => $delegation['filterKey'] ?? 'parent_id',
             'parentIdField' => $delegation['parentIdField'] ?? 'id',
             'features' => [

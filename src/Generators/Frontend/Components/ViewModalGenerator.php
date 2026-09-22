@@ -228,12 +228,26 @@ VUE;
 
     protected function renderModal(string $studly, string $openRef, string $label): string
     {
+        // shelui-engine fork: the prop name passed here MUST match the one
+        // the generated {Module}{Action}Form actually declares --
+        // ActionComponentGenerator/action/form.stub now name that prop
+        // `[[idParam]]` ('uuid' when ModuleConfigContract::hasUuid(), else
+        // 'id'), not a literal `uuid`, so this used to silently fail to bind
+        // for a has_uuid: false module: Vue drops an attribute that matches
+        // no declared prop, leaving the Form's own (non-required, default
+        // '') id prop empty and every endpoint it builds 404ing/hitting
+        // ".../undefined/...". `uuid` on the right-hand side is unchanged --
+        // it's this ViewModal's own already-correctly-sourced prop value
+        // (see idParam()'s docblock, BaseComponentGenerator), only the
+        // attribute NAME needed to track the Form's renamed prop.
+        $idParam = $this->idParam();
+
         // `modal` is what tells the shared Form to emit instead of navigate —
         // the same prop the generated Create/Edit forms take.
         return <<<VUE
 		<AppDialog v-model:open="{$openRef}" title="{$label}" size="lg">
 			<{$this->moduleName}{$studly}Form
-				:uuid="uuid"
+				:{$idParam}="uuid"
 				modal
 				@cancel="{$openRef} = false"
 				@success="{$openRef} = false"

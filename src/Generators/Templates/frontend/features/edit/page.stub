@@ -3,7 +3,7 @@
 		:back-link="backLink"
 		:breadcrumbs="[{label: $t('common.dashboard'), href: '/dashboard'}, {label: $t('[[moduleRoute]].title'), href: '/[[moduleRoute]]/list'}, {label: $t('common.edit'), href: null}]">
 		<div class="px-1 pt-2">
-			<[[ModuleName]]EditForm :uuid="id" :cancel-link="backLink" />
+			<[[ModuleName]]EditForm :[[idParam]]="id" :cancel-link="backLink" />
 		</div>
 	</MainLayout>
 </template>
@@ -15,7 +15,7 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import [[ModuleName]]EditForm from './Components/[[ModuleName]]EditForm.vue'
 
 const route = useRoute()
-const id = route.params.uuid as string
+const id = route.params.[[idParam]] as string
 
 // Get back link from query or default to details page
 const backLink = computed(() => {

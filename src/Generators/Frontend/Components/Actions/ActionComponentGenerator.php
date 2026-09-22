@@ -107,6 +107,18 @@ class ActionComponentGenerator extends BaseComponentGenerator
             '[[actionRoute]]' => "/{$moduleRoute}/{$actionRoute}",
             '[[actionCancelLink]]' => "/{$moduleRoute}/list",
             '[[actionEndpointExpr]]' => $this->buildEndpointExpression($action, $moduleRoute, $actionRoute),
+            // shelui-engine fork: this module's own record-identifier prop
+            // name -- 'uuid' when ModuleConfigContract::hasUuid(), else 'id'
+            // (see idParam()'s docblock, BaseComponentGenerator). form.stub/
+            // page.stub used to hardcode a `uuid` prop/route-param
+            // unconditionally; the backend's already-fixed
+            // ActionServiceGenerator::routeKeyParam() established
+            // `urlParams: ['id']` as the correct config convention for a
+            // has_uuid: false module's action -- buildEndpointExpression()
+            // below turns that into `${props.id}`, which only resolves if
+            // the Form actually declares an `id` prop. This is the frontend
+            // half of that same fix.
+            '[[idParam]]' => $this->idParam(),
             '[[actionFieldsBlock]]' => $actionFieldsBlock,
             '[[actionConfirmCheckboxBlock]]' => $actionConfirmCheckboxBlock,
             '[[actionFormFields]]' => $actionFormFields,
@@ -155,8 +167,12 @@ class ActionComponentGenerator extends BaseComponentGenerator
      * MUST mirror RoutesGenerator::generateActionRoutes(): the component used to
      * hard-code `/{module}/{action}/create`, a path the backend never
      * registers, so the emitted UI could not have worked even once it was
-     * wired up. Laravel's `{param}` placeholders become `${props.param}` so the
-     * uuid in the URL is the record the modal was opened for.
+     * wired up. Laravel's `{param}` placeholders become `${props.param}` --
+     * purely config-driven (`$action['urlParams']`), never a hardcoded 'uuid'
+     * here. When this module's own record is the target, the config's
+     * urlParams entry should name whatever $this->idParam() resolves to
+     * ('uuid' or 'id' -- shelui-engine fork), matching the `[[idParam]]`
+     * prop form.stub/page.stub now declare instead of always `props.uuid`.
      */
     protected function buildEndpointExpression(array $action, string $moduleRoute, string $actionRoute): string
     {

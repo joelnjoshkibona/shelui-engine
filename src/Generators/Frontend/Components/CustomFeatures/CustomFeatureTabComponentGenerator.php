@@ -133,12 +133,19 @@ class CustomFeatureTabComponentGenerator extends BaseComponentGenerator
         // /{module}/{parentKey}/{delegation}/{itemUuid}/{op} for edit/delete,
         // /{module}/{parentKey}/{delegation}/{itemUuid}/delete/check for
         // deleteCheck) so the frontend never requests a path the backend
-        // didn't register. ${uuid.value} is the PARENT uuid, already resolved
-        // client-side (tab components always live under a parent details
-        // page). The literal string '{uuid}' (not a JS template expression)
-        // is the CHILD/item uuid — CrudListPanel substitutes it with the
-        // currently-selected row's id right before rendering the relevant
-        // dialog, since it isn't known until then.
+        // didn't register. ${uuid.value} is the PARENT's own record identifier,
+        // already resolved client-side (tab components always live under a
+        // parent details page) — see the [[idParam]] fix below for how that
+        // value is now sourced correctly for a has_uuid: false parent module.
+        // The variable is still named `uuid` in tab_action.stub: purely
+        // cosmetic (its value, not its name, is what a has_uuid: false parent
+        // needs fixed — see BaseComponentGenerator::idParam()'s docblock on
+        // when a rename is/isn't warranted). The literal string '{uuid}' (not
+        // a JS template expression) is the CHILD/item uuid — CrudListPanel
+        // substitutes it with the currently-selected row's id right before
+        // rendering the relevant dialog, since it isn't known until then.
+        // That is the RELATED module's own key, a separate, deferred question
+        // (mirrors the backend's "related module's own key" precedent).
         $moduleNameLower = \Illuminate\Support\Str::kebab($this->moduleName);
         $featureNameLower = \Illuminate\Support\Str::kebab($featureName);
         $base = "/{$moduleNameLower}/\${uuid.value}/{$featureNameLower}";
@@ -283,6 +290,16 @@ class CustomFeatureTabComponentGenerator extends BaseComponentGenerator
         $content = $this->replacePlaceholders($content, [
             '[[FeatureName]]' => $featureName,
             '[[featureName]]' => strtolower($featureName),
+            // shelui-engine fork: the PARENT module's own route-param name --
+            // 'uuid' when ModuleConfigContract::hasUuid(), else 'id'. Feeds
+            // tab_action.stub's `uuid` computed(), which used to hardcode
+            // `route.params.uuid` unconditionally -- for a has_uuid: false
+            // parent module the parent details route now registers an `:id`
+            // segment (FrontendRoutesGenerator::$idParam), so that literal
+            // read undefined and every request this tab builds off `${uuid.value}`
+            // (list/create/edit/delete/view endpoints above) 404'd/hit
+            // ".../undefined/...". See idParam()'s docblock, BaseComponentGenerator.
+            '[[idParam]]' => $this->idParam(),
             '[[RelatedModule]]' => $relatedModuleName,
             '[[relatedModule]]' => strtolower($relatedModuleName),
             '[[columns]]' => $columns,

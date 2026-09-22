@@ -95,6 +95,22 @@ class EditFormGenerator extends BaseComponentGenerator
         if (!$isWizard && $requiresConfirmation) {
             $wizardStateBlock = "const confirmed = ref(false)\n";
         }
+
+        // shelui-engine fork: the record-identifier PROP this EditForm itself
+        // declares -- 'uuid' when ModuleConfigContract::hasUuid(), else 'id'
+        // (see BaseComponentGenerator::idParam()'s docblock). edit/form.stub
+        // used to declare a prop literally named `uuid` and read
+        // `props.uuid` to build both the submit and view endpoint URLs,
+        // regardless of has_uuid -- for a has_uuid: false module, whatever
+        // called this component (EditPageGenerator's page.stub, or
+        // ViewLayoutGenerator's own-module edit modal) passes the record's
+        // real 'id', never a 'uuid', so the prop -- and every URL built from
+        // it -- was undefined. BaseComponentGenerator::generateFormFooter()/
+        // buildEditDraftBlocks() were already fixed to read `props.{idParam}`
+        // and the auto-exposed `{idParam}` template binding for the "open
+        // full page" link and useDraft() call -- this is the matching fix on
+        // the prop declaration itself those two depend on.
+        $idParam = $this->idParam();
         // Only meaningful once fieldLabels itself is declared (see
         // generateFieldLabelsSeedBlock()'s own docblock for why this needs a
         // separate seed on top of generateField()'s live-pick capture).
@@ -168,6 +184,7 @@ class EditFormGenerator extends BaseComponentGenerator
             '[[inlineItemsBlock]]'     => $this->generateInlineItemsBlock($unclaimedInlineItems),
             '[[inlineItemsFieldDefs]]' => $this->generateInlineItemsFieldDefs($inlineItems),
             '[[confirmCheckboxBlock]]' => $confirmCheckboxBlock,
+            '[[idParam]]'              => $idParam,
             '[[requestImportLine]]'    => $requestImportLine,
             '[[fileRefsBlock]]'        => $fileRefsBlock,
             '[[submitCall]]'           => $submitCall,

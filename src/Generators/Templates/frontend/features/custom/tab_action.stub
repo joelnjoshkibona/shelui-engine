@@ -100,10 +100,15 @@ const emit = defineEmits<{
 	refresh: []
 }>()
 
-// Read parent ID from route params — reliable on hard refresh before props.data is populated
+// Read parent ID from route params — reliable on hard refresh before props.data is populated.
+// route.params.[[idParam]], not a hardcoded route.params.uuid (shelui-engine fork): this tab
+// is mounted as a child route of the parent module's own details route, which registers an
+// `:id` segment instead of `:uuid` for a has_uuid: false module (FrontendRoutesGenerator's own
+// idParam) -- reading the literal 'uuid' key off route.params returned undefined there, and
+// every endpoint this component builds from `uuid.value` below 404'd.
 const { t } = useI18n()
 const route = useRoute()
-const uuid = computed(() => String(props.uuid || route.params.uuid || ''))
+const uuid = computed(() => String(props.uuid || route.params.[[idParam]] || ''))
 
 /**
  * Parent's primary key, used as the FK default when creating/editing a child.

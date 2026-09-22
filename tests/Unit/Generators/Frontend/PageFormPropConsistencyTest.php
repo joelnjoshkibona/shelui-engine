@@ -63,6 +63,29 @@ class PageFormPropConsistencyTest extends TestCase
     }
 
     /**
+     * shelui-engine fork: edit/form.stub and delete/form.stub's own
+     * record-identifier prop (previously always the literal `uuid`) is now
+     * declared -- and wired to from edit/page.stub, delete/page.stub -- as
+     * the `[[idParam]]` placeholder (see CreateFormGenerator::idParam() /
+     * EditFormGenerator::idParam() / DeleteFormGenerator's matching
+     * resolution: 'uuid' when ModuleConfigContract::hasUuid(), else 'id').
+     * This test reads RAW, unresolved .stub text -- it never runs a
+     * generator -- so a literal `[[idParam]]` token appears verbatim in
+     * both extraction sites below. Normalizing it to its documented DEFAULT
+     * resolution ('uuid', matching has_uuid's own true-when-absent default,
+     * see ModuleConfigContract::hasUuid()) keeps this test's actual mission
+     * -- catching a page stub and its child stub silently drifting apart on
+     * a prop name -- intact and independent of the has_uuid fork concern:
+     * both sides of every pair this test checks now consistently use the
+     * SAME placeholder token, so they still only match each other, not an
+     * arbitrary fixed string.
+     */
+    private function normalizeIdParamPlaceholder(string $content): string
+    {
+        return str_replace('[[idParam]]', 'uuid', $content);
+    }
+
+    /**
      * Extract every `:propName="expr"` attribute bound on the first opening
      * tag matching $tagNamePattern within $stubContent.
      *
@@ -70,6 +93,8 @@ class PageFormPropConsistencyTest extends TestCase
      */
     private function extractPassedProps(string $stubContent, string $tagNamePattern): array
     {
+        $stubContent = $this->normalizeIdParamPlaceholder($stubContent);
+
         if (!preg_match('/<' . $tagNamePattern . '\b([^>]*)>/', $stubContent, $tagMatch)) {
             $this->fail("Could not locate an opening tag matching /{$tagNamePattern}/ in the given stub content.");
         }
@@ -101,6 +126,7 @@ class PageFormPropConsistencyTest extends TestCase
      */
     private function extractRequiredProps(string $stubContent): array
     {
+        $stubContent = $this->normalizeIdParamPlaceholder($stubContent);
         $propsBlock = $this->extractDefinePropsBlock($stubContent);
 
         preg_match_all('/(\w+)\s*:\s*\{[^{}]*\brequired\s*:\s*true\b[^{}]*\}/', $propsBlock, $matches);

@@ -27,7 +27,12 @@ import { Button } from '@/components/ui/button'
  * generateSubmitCall()) -- an explicit, narrow gap, not a silent one.
  */
 const props = defineProps({
-	uuid: { type: String, default: '' },
+	// shelui-engine fork: prop name resolves via has_uuid --
+	// 'uuid' when the module has one, else 'id' -- matching the route
+	// param FrontendRoutesGenerator registers for a `uiType: "page"` action
+	// and the urlParams config convention ActionServiceGenerator (backend)
+	// already established (urlParams: ['id'] for a has_uuid: false module).
+	[[idParam]]: { type: String, default: '' },
 	parentUuid: { type: String, default: '' },
 	modal: { type: Boolean, default: false },
 	cancelLink: { default: '[[actionCancelLink]]' },

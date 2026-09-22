@@ -57,7 +57,17 @@ class CustomFeatureModalComponentGenerator extends BaseComponentGenerator
         
         // Get API endpoint from backend list feature config (for ListPageBare)
         $listConfig = $backendFeatures['list'] ?? [];
-        $parentKey = $customFeature['parentKey'] ?? 'uuid';
+        // shelui-engine fork: PARENT module's own record-identifier key --
+        // 'uuid' when ModuleConfigContract::hasUuid(), else 'id' (see
+        // idParam()'s docblock, BaseComponentGenerator). DelegationModalComponentGenerator
+        // already resolves this the same way for a real delegation
+        // (adaptDelegationToCustomFeature()); this covers a custom feature
+        // built without going through a delegation. Only changes the DEFAULT
+        // path this module builds when no explicit endpoint.path is
+        // configured -- the item/child's own key (${deletingItem.value.uuid}
+        // below) is a separate, deferred question (mirrors the backend's
+        // "related module's own key" precedent).
+        $parentKey = $customFeature['parentKey'] ?? $this->idParam();
         $listBasePath = $listConfig['endpoint']['path'] ?? "/{$this->moduleNameLower}/{{$parentKey}}/{$featureNameLower}";
         // Replace parent key placeholder with template literal
         $listBasePath = str_replace("{{$parentKey}}", '${props.parentUuid}', $listBasePath);

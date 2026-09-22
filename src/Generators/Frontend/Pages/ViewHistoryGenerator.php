@@ -17,7 +17,15 @@ class ViewHistoryGenerator extends BaseComponentGenerator
         $content = $this->getTemplateContent('features/view/history', 'frontend');
         
         $viewConfig = $this->config['features']['frontend']['view'] ?? [];
-        $idParam = $viewConfig['idParam'] ?? 'uuid';
+        // shelui-engine fork: same pre-fork hardcoded-'uuid' fallback
+        // FrontendRoutesGenerator/ViewLayoutGenerator had -- resolve via the
+        // shared $this->idParam() (BaseComponentGenerator) instead of
+        // re-deriving an independent copy of the same default. [[idParam]]
+        // is not currently interpolated into history.stub's own markup, but
+        // this keeps the resolved value consistent everywhere this class
+        // computes it, matching the single-source-of-truth convention the
+        // rest of this fork's idParam fix uses.
+        $idParam = $this->idParam();
         
         $content = $this->replacePlaceholders($content, [
             '[[idParam]]' => $idParam,

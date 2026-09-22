@@ -86,7 +86,7 @@ const handleSubmit = async () => {
 		if (response.status) {
 			toast.success(props.successMessage || t('[[moduleRoute]].created_success'))
 			[[discardDraftOnSuccess]]
-			handleCreated(response.data.id, response.data.uuid)
+			handleCreated(response.data.id, response.data.[[idParam]])
 		} else {
 			if (response.errors) {
 				errors.value = response.errors

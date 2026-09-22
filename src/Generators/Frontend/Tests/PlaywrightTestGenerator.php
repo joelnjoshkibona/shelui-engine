@@ -179,6 +179,28 @@ class PlaywrightTestGenerator extends BaseGenerator
     protected ?string $anchorField = null;
     protected bool $anchorFieldResolved = false;
 
+    /**
+     * shelui-engine fork: this module's own record-identifier field/route-param
+     * name -- 'uuid' when ModuleConfigContract::hasUuid(), else 'id'. Identical
+     * resolution rule to FrontendRoutesGenerator::$idParam/BaseComponentGenerator::
+     * idParam() (this generator extends BaseGenerator directly, not
+     * BaseComponentGenerator, so it gets its own constructor-computed copy rather
+     * than inheriting the shared helper method).
+     *
+     * The DOM-driven paths in this file (uuidFromTestId() reading a rendered
+     * data-testid attribute back, then threading that value through as
+     * `recordUuid`) already resolve correctly for a has_uuid: false module
+     * without touching this property at all -- they never assume which field
+     * name backs the value, only that a `[[moduleName]]-{action}-{value}`
+     * attribute exists and that {value} is a real, followable identifier. This
+     * property is only needed where a generated test reads THIS module's own
+     * record identifier directly off an API JSON response body (`.data.uuid`),
+     * which does NOT exist on a has_uuid: false module's response -- only
+     * `.data.id` does (see buildCreateBlock()'s and buildFixtureCreateBody()'s
+     * own "no anchor field" branches, the only two such reads in this file).
+     */
+    protected string $idParam;
+
     public function __construct(string $moduleName, string $moduleGroup = 'Core', array $config = [])
     {
         parent::__construct($moduleName, $moduleGroup, $config);
@@ -188,6 +210,9 @@ class PlaywrightTestGenerator extends BaseGenerator
         $this->hasView   = !empty($frontend['view']);
         $this->hasEdit   = !empty($frontend['edit']);
         $this->hasDelete = !empty($frontend['delete']);
+
+        $this->idParam = $frontend['view']['idParam']
+            ?? (ModuleConfigContract::hasUuid($config) ? 'uuid' : 'id');
 
         $this->createFields = $this->excludeInlineTotalTargets($this->excludeJsonColumnFields($frontend['create']['fields'] ?? []));
         $this->editFields    = $this->excludeInlineTotalTargets($this->excludeJsonColumnFields($frontend['edit']['fields'] ?? []));
@@ -2585,25 +2610,38 @@ JS;
             // ORDER BY id DESC, so `.first()` kept grabbing an unrelated seeded row
             // instead of the one this test just created). Arm a response listener
             // BEFORE the submit click below (buildTargetRowBlock() awaits it after) so
-            // the created record is identified by the uuid the backend actually
+            // the created record is identified by the record key the backend actually
             // returned, never by DOM position.
             $responseArm = <<<'JS'
 
 		const createResponsePromise = page.waitForResponse((res) => res.request().method() === 'POST' && res.url().endsWith('/create'));
 JS;
+            // shelui-engine fork: this used to read `?.data?.uuid` unconditionally --
+            // a has_uuid: false module's create response has no `uuid` key at all
+            // (only `.data.id`, see ModuleConfigContract::hasUuid() and this
+            // generator's own $idParam, resolved identically to
+            // FrontendRoutesGenerator::$idParam/BaseComponentGenerator::idParam()),
+            // so createdRecordUuid was always null here and every such module's
+            // create spec threw "no uuid was found in the response" on every run.
+            // The local var/property names stay literally "uuid" (recordUuid,
+            // createdRecordUuid, uuidFromTestId(), the { uuid: ... } fixture
+            // shape) -- only the field actually read off the JSON body changes;
+            // see this class's cleanupHelperBlock()/uuidFromTestId() docblocks for
+            // why renaming those is unneeded churn, not a correctness fix.
             $confirm = <<<'JS'
 
-		console.log(`[${MODULE_LABEL}] create submitted (no plain text/number field available — targeting the created record by its API-returned uuid instead)`);
+		console.log(`[${MODULE_LABEL}] create submitted (no plain text/number field available — targeting the created record by its API-returned record key instead)`);
 		const createResponse = await createResponsePromise;
 		if (!createResponse.ok()) {
 			const createResponseBody = await createResponse.json().catch(() => null);
 			throw new Error(`[${MODULE_LABEL}] create request failed: HTTP ${createResponse.status()} ${JSON.stringify(createResponseBody)}`);
 		}
-		const createdRecordUuid = (await createResponse.json())?.data?.uuid ?? null;
+		const createdRecordUuid = (await createResponse.json())?.data?.__ID_PARAM__ ?? null;
 		if (!createdRecordUuid) {
-			throw new Error(`[${MODULE_LABEL}] create succeeded (HTTP ${createResponse.status()}) but no uuid was found in the response`);
+			throw new Error(`[${MODULE_LABEL}] create succeeded (HTTP ${createResponse.status()}) but no __ID_PARAM__ was found in the response`);
 		}
 JS;
+            $confirm = str_replace('__ID_PARAM__', $this->idParam, $confirm);
         }
 
         $shotLine = "\n\t\tawait shot(page, '03-after-create');";
@@ -3822,8 +3860,17 @@ JS;
         } else {
             // No anchor field -- DOM/sort position is not a safe way to find "the row
             // just created" (see buildCreateBlock()'s identical fix for why). Read the
-            // uuid straight from the create response instead of round-tripping through
-            // the DOM at all.
+            // record key straight from the create response instead of round-tripping
+            // through the DOM at all.
+            //
+            // shelui-engine fork: reads `.data.{$this->idParam}` ('uuid' or 'id',
+            // resolved once in the constructor -- see $idParam's docblock) instead of
+            // the literal `.data.uuid`, which a has_uuid: false module's create
+            // response never has. The returned shape stays `{ uuid: recordUuid }`
+            // regardless -- every caller (split.e2e.stub's
+            // `const { uuid: recordUuid } = await createFixtureRecord(page)`)
+            // destructures that same literal key; only the VALUE read off the real
+            // API response needed to change.
             $capture = <<<'JS'
 
 	const createResponse = await createResponsePromise;
@@ -3831,12 +3878,13 @@ JS;
 		const body = await createResponse.json().catch(() => null);
 		throw new Error(`[${MODULE_LABEL}] createFixtureRecord: create request failed: HTTP ${createResponse.status()} ${JSON.stringify(body)}`);
 	}
-	const recordUuid = (await createResponse.json())?.data?.uuid ?? null;
+	const recordUuid = (await createResponse.json())?.data?.__ID_PARAM__ ?? null;
 	if (!recordUuid) {
-		throw new Error(`[${MODULE_LABEL}] createFixtureRecord: create succeeded (HTTP ${createResponse.status()}) but no uuid was found in the response`);
+		throw new Error(`[${MODULE_LABEL}] createFixtureRecord: create succeeded (HTTP ${createResponse.status()}) but no __ID_PARAM__ was found in the response`);
 	}
 	return { uuid: recordUuid };
 JS;
+            $capture = str_replace('__ID_PARAM__', $this->idParam, $capture);
         }
 
         [$submit, $responseArm] = $this->applyUniqueOptionRetry($submit, $responseArm, "\t");

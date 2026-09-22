@@ -40,7 +40,7 @@ const { hasPermission } = usePermissions();
 const { t } = useI18n();
 
 const props = defineProps({
-	uuid: { type: String, required: true },
+	[[idParam]]: { type: String, required: true },
 	modal: { type: Boolean, default: false },
 	cancelLink: {default: '/[[moduleRoute]]/list'},
 	title: {default: 'Basic Information'},
@@ -61,12 +61,12 @@ const router = useRouter()
 
 // Computed endpoints with fallbacks
 const submitEndpoint = computed(() => {
-	return props.submitUrl || `/[[moduleRoute]]/${props.uuid}/edit`
+	return props.submitUrl || `/[[moduleRoute]]/${props.[[idParam]]}/edit`
 })
 
 [[splashBlock]]
 const viewEndpoint = computed(() => {
-	return props.viewUrl || `/[[moduleRoute]]/${props.uuid}/view`
+	return props.viewUrl || `/[[moduleRoute]]/${props.[[idParam]]}/view`
 })
 
 [[inlineItemsFieldDefs]]

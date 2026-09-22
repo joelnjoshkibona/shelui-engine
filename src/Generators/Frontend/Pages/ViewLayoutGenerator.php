@@ -37,8 +37,18 @@ class ViewLayoutGenerator extends BaseComponentGenerator
         $primaryField = $viewConfig['titleData'] ?? 'name';
         $secondaryField = $viewConfig['subtitleData'] ?? 'id';
         
-        // Get ID parameter
-        $idParam = $viewConfig['idParam'] ?? 'uuid';
+        // Get ID parameter. shelui-engine fork: this used to hardcode the
+        // 'uuid' fallback independently of FrontendRoutesGenerator's own
+        // computed idParam -- for a has_uuid: false module, the route this
+        // page is mounted under is registered with an `:id` segment (see
+        // FrontendRoutesGenerator::$idParam), so `route.params.[[idParam]]`
+        // resolving to `route.params.uuid` here read undefined and
+        // recordId/navigateTo() broke for every generated action on such a
+        // module. $this->idParam() (BaseComponentGenerator, which this class
+        // extends) is the single shared resolution point every Frontend
+        // component generator should use instead of re-deriving its own
+        // copy of the same fallback -- see its docblock.
+        $idParam = $this->idParam();
         
         // Check if Badge import is needed
         $badgeImport = $this->generateBadgeImport($this->config);
@@ -48,7 +58,10 @@ class ViewLayoutGenerator extends BaseComponentGenerator
         $customFeatureModalStates = $this->generateCustomFeatureModalStates($this->config);
         
         // Edit/Delete markup + imports, emitted only for operations this module actually has.
-        [$actionToolbar, $crudModals, $crudFormImports] = $this->generateCrudOperationBlocks();
+        // $idParam is threaded through: the Edit/Delete modal below binds the record identifier
+        // into {Module}EditForm/{Module}DeleteForm under this exact prop name (see the method's
+        // own docblock addition below for why this must match, not just be a literal 'uuid').
+        [$actionToolbar, $crudModals, $crudFormImports] = $this->generateCrudOperationBlocks($idParam);
 
         $content = $this->replacePlaceholders($content, [
             '[[actionToolbar]]' => $actionToolbar,
@@ -95,9 +108,21 @@ class ViewLayoutGenerator extends BaseComponentGenerator
      * key in one non-recursive str_replace pass, so a token inside a value injected via this
      * method's own placeholder would never get a second pass to resolve it.
      *
+     * shelui-engine fork: the Edit/Delete modals below bind the record id into
+     * {Module}EditForm/{Module}DeleteForm as `:{$idParam}="recordId"` -- EditFormGenerator/
+     * DeleteFormGenerator now declare that prop as `[[idParam]]` ('uuid' when
+     * ModuleConfigContract::hasUuid(), else 'id'), not a literal `uuid`, so this used to
+     * silently fail to bind for a has_uuid: false module (an attribute matching no declared
+     * prop falls through instead of binding, leaving the Form's own required id prop
+     * undefined and every request it builds 404ing). $idParam is passed in from generate(),
+     * which already resolves it via $this->idParam() (BaseComponentGenerator) -- the same
+     * value used for '[[idParam]]' in details_layout.stub's own route.params/navigateTo() code,
+     * so recordId's source and the modal's prop name stay consistent.
+     *
+     * @param string $idParam this module's own record-identifier prop/param name
      * @return array{0: string, 1: string, 2: string} [actionToolbar, crudModals, crudFormImports]
      */
-    private function generateCrudOperationBlocks(): array
+    private function generateCrudOperationBlocks(string $idParam): array
     {
         $frontendFeatures = $this->config['features']['frontend'] ?? [];
         $hasEdit   = !empty($frontendFeatures['edit']);
@@ -179,13 +204,13 @@ VUE;
         if ($hasEdit) {
             $modals[] = "<!-- Edit Modal -->\n"
                 . "\t\t<AppDialog v-model:open=\"editOpen\" :title=\"\$t('{$route}.page_edit')\" size=\"lg\" persistent>\n"
-                . "\t\t\t<{$module}EditForm :uuid=\"recordId\" modal @cancel=\"editOpen = false\" @updated=\"onUpdated\" />\n"
+                . "\t\t\t<{$module}EditForm :{$idParam}=\"recordId\" modal @cancel=\"editOpen = false\" @updated=\"onUpdated\" />\n"
                 . "\t\t</AppDialog>";
         }
         if ($hasDelete) {
             $modals[] = "<!-- Delete Modal -->\n"
                 . "\t\t<AppDialog v-model:open=\"deleteOpen\" :title=\"\$t('{$route}.page_delete')\" size=\"md\">\n"
-                . "\t\t\t<{$module}DeleteForm :uuid=\"recordId\" modal @cancel=\"deleteOpen = false\" @deleted=\"onDeleted\" />\n"
+                . "\t\t\t<{$module}DeleteForm :{$idParam}=\"recordId\" modal @cancel=\"deleteOpen = false\" @deleted=\"onDeleted\" />\n"
                 . "\t\t</AppDialog>";
         }
 

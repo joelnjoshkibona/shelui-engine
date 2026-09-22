@@ -3,7 +3,7 @@
 		:back-link="backLink"
 		:breadcrumbs="[{label: $t('common.dashboard'), href: '/dashboard'}, {label: $t('[[moduleRoute]].title'), href: '/[[moduleRoute]]/list'}, {label: $t('common.delete'), href: null}]">
 		<div class="px-1 pt-2">
-			<[[ModuleName]]DeleteForm :uuid="uuid" :cancel-link="backLink" />
+			<[[ModuleName]]DeleteForm :[[idParam]]="uuid" :cancel-link="backLink" />
 		</div>
 	</MainLayout>
 </template>
@@ -16,6 +16,6 @@ import [[ModuleName]]DeleteForm from './Components/[[ModuleName]]DeleteForm.vue'
 
 const route = useRoute()
 
-const uuid = computed(() => route.params.uuid as string)
+const uuid = computed(() => route.params.[[idParam]] as string)
 const backLink = computed(() => (route.query.back as string) || `/[[moduleRoute]]/${uuid.value}/details/overview`)
 </script>

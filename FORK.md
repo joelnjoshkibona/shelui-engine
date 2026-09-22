@@ -24,11 +24,9 @@ directly — this is real, working code, via the shared `ModuleConfigContract`),
 ## Scope
 
 Intentionally narrow — everything else (morphs, blueprint generation) stays identical to upstream.
-This is not a rewrite. The boundary is **backend generation only**: frontend and MobileApp generation
-still hardcode `uuid` throughout, deliberately left untouched (see "What's deliberately NOT fixed"
-below) since every shelui_erp Core module's frontend is hand-written
-(`features.frontend.enabled: false`, see shelui_erp's own `CLAUDE.md`) and MobileApp is opt-in,
-disabled by default, and never enabled by a legacy-repointed module.
+This is not a rewrite. Backend AND frontend generation are both covered now (see "What's fixed"
+below); **MobileApp generation remains explicitly out of scope and untouched** (`src/Generators/
+MobileApp/**`) — it is opt-in, disabled by default, and never enabled by a legacy-repointed module.
 
 ## What's fixed
 
@@ -66,27 +64,63 @@ All four deviations above, across every backend generation path that is actually
   method now resolves `$this->routeKeyParam` (`'uuid'` or `'id'`) consistently, plus the flag-vs-
   timestamp soft-delete assertion split (`assertSoftDeleted()` with a custom `$deletedAtColumn`, or
   `assertDatabaseHas([..., $flagColumn => 1])` for the `'flag'` type).
+- **Frontend generation** (`src/Generators/Frontend/**`) — the same class of gap as backend routing:
+  every route/component/stub hardcoded `uuid` as a vue-router path segment, a JS variable/prop, or an
+  API-response field read, with zero `has_uuid` awareness. A pre-existing `features.frontend.view.
+  idParam` escape hatch already existed (used inconsistently, and always defaulting to the bare literal
+  `'uuid'`) — now resolved centrally: `FrontendRoutesGenerator::$idParam` (constructor-computed) and
+  `BaseComponentGenerator::idParam()` (a shared method every other Frontend component generator calls,
+  since they all extend it) both resolve `idParam ?? (ModuleConfigContract::hasUuid() ? 'uuid' :
+  'id')`, and every generator/stub that builds a route, an API request URL, or reads this module's own
+  record identifier off a fetched response now goes through one of those two. Covers: routes.ts (list/
+  create/edit/delete/view/action-page routes), the CRUD forms+pages (Create/Edit/Delete), the View/
+  Details surface (modal, layout, history, overview), delegation/custom-feature/action components
+  (including the delegating module's own `parentKey` default, the same four-independent-hardcoded-
+  copies shape the backend `parentKey` fix already closed), and `PlaywrightTestGenerator` (its own
+  `$idParam`, since it extends `BaseGenerator` directly — the frontend twin of the backend
+  `PhpUnitTestGenerator` sweep: fixed the two places a generated e2e spec reads `.data.uuid` off a
+  create response, via an `__ID_PARAM__` nowdoc placeholder). Full suite: 1395 tests passing (was 1334
+  before this pass).
 
 ## What's deliberately NOT fixed
 
-- **Frontend generation** (`src/Generators/Frontend/**`) and **MobileApp generation**
-  (`src/Generators/MobileApp/**`) still hardcode `uuid` throughout their own routes/components/tests.
-  Not reachable for a shelui_erp Core module (frontend is hand-written; MobileApp is opt-in and never
-  enabled for a legacy-repointed module) — see "Scope" above.
+- **MobileApp generation** (`src/Generators/MobileApp/**`) still hardcodes `uuid` throughout its own
+  routes/components/tests, and was not opened at all during the frontend pass. Opt-in, disabled by
+  default, never enabled by a legacy-repointed module — see "Scope" above.
 - **`RoutesGenerator::generateCustomFeatureRoutes()`** and **`ControllerGenerator::
   generateCustomFeatureMethods()`** (both marked `@deprecated Use generateDelegationRoutes/Methods or
   generateActionRoutes/Methods`) — confirmed via grep to be dead code, never called from `generate()`
   or anywhere else in this package. Left untouched rather than fixing unreachable code.
-- **A delegation's RELATED/child record's own key** (the `{itemUuid}` route segment, `$related->uuid`
-  in `DelegationServiceGenerator`'s edit/view/delete methods and `PhpUnitTestGenerator`'s matching
-  tests) — this is the RELATED module's own `has_uuid`, a separate question from the delegating
-  (parent) module's `parentKey` fixed above. No real shelui_erp delegation currently points at a
-  `has_uuid: false` related module; deferred rather than guessed at.
-- **`inline_items`' own child-row `uuid` field** (`unset($inlineItem['uuid'])` etc. in
-  `CreateServiceGenerator`/`EditServiceGenerator`/`BaseServiceGenerator`) — a separate, self-contained
-  convention for identifying rows *within* an inline-items JSON payload, unrelated to whether the
-  parent or child module has a real `uuid` column. `inline_items` children are this project's own
+- **A delegation's RELATED/child record's own key** — on the backend, the `{itemUuid}` route segment
+  and `$related->uuid` in `DelegationServiceGenerator`'s edit/view/delete methods and
+  `PhpUnitTestGenerator`'s matching tests; on the frontend, the identical shape shows up as the
+  child/item's own key in `CustomFeatureTabComponentGenerator`/`CustomFeatureModalComponentGenerator`
+  (the literal `{uuid}` item-route placeholder, `${deletingItem.value.uuid}`), and as
+  `RelatedRecordLink`'s own `:uuid` prop wherever a generated list/view cell links to a *different*
+  module's record via a foreign-key relation (`BaseComponentGenerator::
+  generateCustomCellRenderersFromListFields()`). All of these are the RELATED/child module's own
+  `has_uuid`, a separate question from the delegating (parent) module's `parentKey`/`idParam` fixed
+  above. No real shelui_erp delegation or FK relation currently points at a `has_uuid: false` related
+  module; deferred rather than guessed at, consistently on both backend and frontend.
+- **`FRONTEND/src/components/related-record/RelatedRecordLink.vue` and `FRONTEND/src/composables/
+  useEntityNavigation.ts`** — hand-written core app infrastructure in the *consuming* `shelui_erp`
+  repo, not generated by this package at all. `RelatedRecordLink`'s own `uuid` prop and its documented
+  `detailsView` component contract (`props: { uuid, embedded, activeTab }`) would need to become
+  `has_uuid`-aware for a `RelatedRecordLink` pointed at a `has_uuid: false` module to work — out of
+  scope for this pass (a different repository, hand-written rather than generated); flagged here so it
+  isn't mistaken for already covered.
+- **`inline_items`' own child-row `uuid` field** (`unset($inlineItem['uuid'])` in
+  `CreateServiceGenerator`/`EditServiceGenerator`/`BaseServiceGenerator` on the backend; `item.uuid` as
+  a Vue `:key` in `fields/line-items-view-wrapper.stub` on the frontend) — a separate, self-contained
+  convention for identifying rows *within* an inline-items JSON payload or list, unrelated to whether
+  the parent or child module has a real `uuid` column. `inline_items` children are this project's own
   generator-native tables, not legacy-repointed ones, so this was never in scope.
+- **Cosmetic internal naming** — a JS variable, Vue prop, or PHPUnit local variable literally named
+  `uuid` whose *value* is already correctly sourced from the right place (e.g. a route param already
+  resolved via `idParam`/`routeKeyParam`) is left named `uuid` rather than renamed to `id`/`recordKey`
+  throughout. Renaming these has no functional effect and was judged not worth the diff size/risk;
+  every such spot found during the frontend pass is called out explicitly in its own commit/PR
+  discussion rather than silently skipped.
 
 ## Tracking upstream
 
@@ -103,7 +137,8 @@ deviations documented above only.
 
 ## Status
 
-All four deviations patched and tested (full suite green after every change; new tests added per
-capability — see git log). `docs/specs/AUTH_DATA_ARCHITECTURE.md` §5.2 in shelui_erp should be
-updated to reflect `LegacyBaseModel`'s removal in favor of this fork's per-model column-naming
-emission.
+All four deviations patched and tested across both backend and frontend generation (full suite green
+after every change; new tests added per capability — see git log). `docs/specs/
+AUTH_DATA_ARCHITECTURE.md` §5.2 in shelui_erp has been updated to reflect `LegacyBaseModel`'s removal
+in favor of this fork's per-model column-naming emission. MobileApp generation remains unfixed and
+out of scope, deferred by explicit user request.
