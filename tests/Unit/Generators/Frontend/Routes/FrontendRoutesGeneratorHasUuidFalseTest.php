@@ -95,6 +95,40 @@ class FrontendRoutesGeneratorHasUuidFalseTest extends TestCase
         $this->assertStringContainsString("path: '/warehouses/:uuid/details'", $content);
     }
 
+    // ─── {Module}ModuleConfig's own idParam field (used by RelatedRecordLink ───
+    // ─── to read THIS module's identifier off a loaded relation) ────────────
+
+    public function test_module_config_export_idparam_is_id_when_has_uuid_false(): void
+    {
+        $content = $this->generateAndRead([
+            'has_uuid' => false,
+            'features' => ['frontend' => ['view' => true]],
+        ]);
+
+        $this->assertStringContainsString("export const WarehousesModuleConfig: EntityModuleConfig = {", $content);
+        $this->assertStringContainsString("idParam: 'id',", $content);
+    }
+
+    public function test_module_config_export_idparam_is_uuid_when_has_uuid_true(): void
+    {
+        $content = $this->generateAndRead([
+            'has_uuid' => true,
+            'features' => ['frontend' => ['view' => true]],
+        ]);
+
+        $this->assertStringContainsString("idParam: 'uuid',", $content);
+    }
+
+    public function test_module_config_export_idparam_honors_explicit_override(): void
+    {
+        $content = $this->generateAndRead([
+            'has_uuid' => true,
+            'features' => ['frontend' => ['view' => ['idParam' => 'slug']]],
+        ]);
+
+        $this->assertStringContainsString("idParam: 'slug',", $content);
+    }
+
     public function test_explicit_id_param_override_wins_regardless_of_has_uuid(): void
     {
         $content = $this->generateAndRead([

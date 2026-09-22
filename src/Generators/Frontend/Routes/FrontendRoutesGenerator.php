@@ -210,6 +210,13 @@ export const {$this->moduleName}ModuleConfig: EntityModuleConfig = {
 \tmode: 'modal',
 \troute: '/{$moduleRoute}',
 \tdetailsView: () => import('./Components/{$this->moduleName}ViewModal.vue'),
+\t// Which record-identifier prop RelatedRecordLink must bind onto this
+\t// module's own {$this->moduleName}ViewModal.vue -- resolved the same way
+\t// as this generator's own \$idParam (see that property's docblock).
+\t// Lets a RelatedRecordLink pointed at THIS module read the right
+\t// identifier off the loaded relation regardless of the linking module's
+\t// own routing scheme.
+\tidParam: '{$this->idParam}',
 \t// Title + size MUST match what the list page passes to its own <AppDialog>
 \t// ({$moduleRoute}.page_details at 3xl). Without them the same ViewModal opened
 \t// via a RelatedRecordLink rendered with no header bar and at a narrower

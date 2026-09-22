@@ -37,6 +37,38 @@ abstract class BaseComponentGenerator extends BaseGenerator
     }
 
     /**
+     * shelui-engine fork: the RELATED module's own record-identifier prop
+     * name for a `RelatedRecordLink` emitted by this module's FK cell
+     * renderer (see generateCustomCellRenderersFromListFields() below) --
+     * the twin of idParam() above, but resolved for a DIFFERENT module than
+     * $this->config, via PathManager::findModuleInRegistry() (the same
+     * registry-lookup shape BaseServiceGenerator::resolveChildAuditColumn()
+     * already established for a delegation child's own audit columns).
+     * Defaults to 'uuid' -- not idParam()'s hasUuid()-driven default -- when
+     * the related module can't be resolved (not yet generated/registered,
+     * or an empty/self-referential $relatedModule), because 'uuid' is the
+     * literal this replaces and RelatedRecordLink already degrades to inert
+     * text for an unregistered target regardless of which prop name it
+     * receives.
+     */
+    protected function resolveRelatedIdParam(string $relatedModule): string
+    {
+        if ($relatedModule === '') {
+            return 'uuid';
+        }
+
+        $entry = PathManager::findModuleInRegistry($relatedModule);
+        if ($entry === null) {
+            return 'uuid';
+        }
+
+        $relatedConfig = $entry['config'] ?? $entry;
+
+        return $relatedConfig['features']['frontend']['view']['idParam']
+            ?? (ModuleConfigContract::hasUuid($relatedConfig) ? 'uuid' : 'id');
+    }
+
+    /**
      * Generate a human-readable label from a field name
      * Converts snake_case to Title Case, removes " Id" and " At" suffixes
      * 
@@ -477,10 +509,11 @@ abstract class BaseComponentGenerator extends BaseGenerator
                 $relationAccessor = preg_replace('/_id$/', '', $key);
                 $relatedModule = $field['relatedModule'] ?? '';
                 $displayField = $field['displayField'] ?? 'name';
+                $relatedIdParam = $this->resolveRelatedIdParam($relatedModule);
 
                 $renderer = "\t\t<!-- Custom cell renderer for FK column -->\n";
                 $renderer .= "\t\t<template #cell-{$key}=\"{ {$slotProp} }\">\n";
-                $renderer .= "\t\t\t<RelatedRecordLink module=\"{$relatedModule}\" :uuid=\"{$slotProp}.{$relationAccessor}?.uuid\">\n";
+                $renderer .= "\t\t\t<RelatedRecordLink module=\"{$relatedModule}\" :uuid=\"{$slotProp}.{$relationAccessor}?.{$relatedIdParam}\">\n";
                 $renderer .= "\t\t\t\t{{ {$slotProp}.{$relationAccessor}?.{$displayField} || 'N/A' }}\n";
                 $renderer .= "\t\t\t</RelatedRecordLink>\n";
                 $renderer .= "\t\t</template>";

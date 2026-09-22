@@ -3,6 +3,7 @@
 namespace Blutrixx\GeneratorEngine\Tests\Unit\Generators\Frontend\Components;
 
 use Blutrixx\GeneratorEngine\Generators\Frontend\Components\EditFormGenerator;
+use Blutrixx\GeneratorEngine\Generators\Frontend\Pages\ListPageGenerator;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
 use PHPUnit\Framework\TestCase;
 
@@ -33,6 +34,22 @@ use PHPUnit\Framework\TestCase;
  * @see \Blutrixx\GeneratorEngine\Generators\Frontend\Components\BaseComponentGenerator::idParam()
  * @see \Blutrixx\GeneratorEngine\Generators\Frontend\Components\BaseComponentGenerator::generateFormFooter()
  * @see \Blutrixx\GeneratorEngine\Generators\Frontend\Components\BaseComponentGenerator::buildEditDraftBlocks()
+ *
+ * Also covers a related but separate gap: generateCustomCellRenderersFromListFields()'s
+ * `isFk` branch always emitted `<RelatedRecordLink module="..." :uuid="row.x?.uuid">`
+ * -- hardcoding the RELATED module's own record-identifier field name, not
+ * this module's own idParam(). A `RelatedRecordLink` pointed at a
+ * has_uuid: false related module needs `?.id`, not `?.uuid`, since that's
+ * the field the loaded relation actually carries. Fixed via a new
+ * resolveRelatedIdParam(string $relatedModule) helper (mirrors
+ * BaseServiceGenerator::resolveChildAuditColumn()'s PathManager::
+ * findModuleInRegistry() lookup shape), defaulting to 'uuid' when the
+ * related module isn't registered -- same as before this fix, and
+ * consistent with RelatedRecordLink.vue itself degrading to inert text for
+ * an unregistered target regardless of prop name.
+ *
+ * @see \Blutrixx\GeneratorEngine\Generators\Frontend\Components\BaseComponentGenerator::resolveRelatedIdParam()
+ * @see \Blutrixx\GeneratorEngine\Generators\Frontend\Components\BaseComponentGenerator::generateCustomCellRenderersFromListFields()
  */
 class BaseComponentGeneratorHasUuidFalseTest extends TestCase
 {
@@ -51,6 +68,7 @@ class BaseComponentGeneratorHasUuidFalseTest extends TestCase
     {
         PathManager::resetProjectRoot();
         PathManager::resetModuleSubGroup();
+        PathManager::setModuleRegistry([]);
         $this->removeDirectory($this->tmpRoot);
 
         parent::tearDown();
@@ -173,5 +191,93 @@ class BaseComponentGeneratorHasUuidFalseTest extends TestCase
         $content = $this->generateEditFormAndRead($this->config(['has_uuid' => true]));
 
         $this->assertStringContainsString("useDraft('Warehouses', 'Core', 'edit', props.uuid)", $content);
+    }
+
+    // ─── generateCustomCellRenderersFromListFields()'s RelatedRecordLink ───
+    // ─── FK cell renderer: resolveRelatedIdParam()                        ───
+
+    private function generateListPageAndRead(array $config, string $moduleName = 'Warehouses', string $moduleGroup = 'Core'): string
+    {
+        $generator = new ListPageGenerator($moduleName, $moduleGroup, $config);
+        $generator->setForce(true);
+        $this->assertTrue($generator->generate());
+
+        $path = PathManager::getFrontendModulePath($moduleGroup, $moduleName) . "/{$moduleName}ListPage.vue";
+        $this->assertFileExists($path);
+
+        return (string) file_get_contents($path);
+    }
+
+    /** @return array<string, mixed> */
+    private function listConfigWithFkField(): array
+    {
+        return array_replace_recursive($this->config(), [
+            'features' => [
+                'frontend' => [
+                    'list' => [
+                        'fields' => [
+                            ['key' => 'name', 'label' => 'Name', 'type' => 'text'],
+                            [
+                                'key' => 'location_id', 'label' => 'Location', 'type' => 'text',
+                                'data' => 'location?.name', 'isFk' => true,
+                                'relatedModule' => 'Locations', 'displayField' => 'name',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+    }
+
+    public function test_related_record_link_reads_id_when_related_module_has_uuid_false(): void
+    {
+        PathManager::setModuleRegistry([
+            ['name' => 'Locations', 'has_uuid' => false, 'module_type' => 'Core', 'group_name' => null, 'table_name' => 'locations'],
+        ]);
+
+        $content = $this->generateListPageAndRead($this->listConfigWithFkField());
+
+        $this->assertStringContainsString('<RelatedRecordLink module="Locations" :uuid="row.location?.id">', $content);
+        $this->assertStringNotContainsString('row.location?.uuid', $content);
+    }
+
+    public function test_related_record_link_reads_uuid_when_related_module_has_uuid_true(): void
+    {
+        PathManager::setModuleRegistry([
+            ['name' => 'Locations', 'has_uuid' => true, 'module_type' => 'Core', 'group_name' => null, 'table_name' => 'locations'],
+        ]);
+
+        $content = $this->generateListPageAndRead($this->listConfigWithFkField());
+
+        $this->assertStringContainsString('<RelatedRecordLink module="Locations" :uuid="row.location?.uuid">', $content);
+    }
+
+    public function test_related_record_link_defaults_to_uuid_when_related_module_not_registered(): void
+    {
+        // No PathManager::setModuleRegistry() call -- the related module
+        // isn't known yet (not generated, or a hand-authored module.json
+        // field pointing at a module this project never registers). Must
+        // keep emitting exactly what every pre-fix generated module already
+        // has on disk: `?.uuid`, never a guessed `?.id`.
+        $content = $this->generateListPageAndRead($this->listConfigWithFkField());
+
+        $this->assertStringContainsString('<RelatedRecordLink module="Locations" :uuid="row.location?.uuid">', $content);
+    }
+
+    public function test_related_record_link_ignores_this_modules_own_has_uuid(): void
+    {
+        // THIS module (Warehouses) is has_uuid: false, but the related
+        // module (Locations) is a normal has_uuid: true module -- the two
+        // are resolved completely independently, via two different
+        // registry/config lookups (idParam() for this module, plus
+        // resolveRelatedIdParam() for the related one).
+        PathManager::setModuleRegistry([
+            ['name' => 'Locations', 'has_uuid' => true, 'module_type' => 'Core', 'group_name' => null, 'table_name' => 'locations'],
+        ]);
+
+        $config = array_replace_recursive($this->listConfigWithFkField(), ['has_uuid' => false]);
+        $content = $this->generateListPageAndRead($config);
+
+        $this->assertStringContainsString('<RelatedRecordLink module="Locations" :uuid="row.location?.uuid">', $content);
     }
 }
