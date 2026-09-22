@@ -16,9 +16,22 @@ abstract class BaseServiceGenerator extends BaseGenerator
         // the standard migration columns, same as id/uuid always being
         // sortable/present. All three also get a frontend filter control by
         // default now — see generateFilterFields()'s matching appends.
+        //
+        // shelui-engine fork: "uuid" is not universal -- a has_uuid: false module has
+        // no such column, and offering it as a filter 500s the list endpoint
+        // (`where uuid = ...` against a nonexistent column). Gated the same way every
+        // other has_uuid decision in this codebase is (ModuleConfigContract).
+        // "created_at" has the identical latent problem for has_timestamps: false /
+        // custom timestamp column names -- not fixed here, out of scope for this pass
+        // (see FORK.md), left as-is.
+        $systemFields = ['id'];
+        if (ModuleConfigContract::hasUuid($this->config)) {
+            $systemFields[] = 'uuid';
+        }
+        $systemFields[] = 'created_at';
         $fields = $this->appendSystemFields(
             $this->collectConfiguredFilterableFields(),
-            ['id', 'uuid', 'created_at']
+            $systemFields
         );
 
         return $this->fieldsToArrayLiteral($fields);
@@ -408,7 +421,10 @@ abstract class BaseServiceGenerator extends BaseGenerator
         // range instead of an exact-instant match, since the two would
         // otherwise never be equal.
         $filterFields = $this->appendDefaultFilterField($filterFields, 'id', 'ID', 'text');
-        $filterFields = $this->appendDefaultFilterField($filterFields, 'uuid', 'UUID', 'text');
+        // shelui-engine fork: gated on has_uuid -- see generateFilterableFields()'s matching fix.
+        if (ModuleConfigContract::hasUuid($this->config)) {
+            $filterFields = $this->appendDefaultFilterField($filterFields, 'uuid', 'UUID', 'text');
+        }
         $filterFields = $this->appendDefaultFilterField($filterFields, 'created_at', 'Created At', 'date');
 
         if (empty($filterFields)) {

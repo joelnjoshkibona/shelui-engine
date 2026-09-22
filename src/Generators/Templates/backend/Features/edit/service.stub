@@ -14,9 +14,9 @@ class [[ModuleName]]EditService
 
     /**
      * @param array $data Request data
-     * @param array $params Route params (uuid)
+     * @param array $params Route params ([[routeKeyParam]])
      * @param Builder|null $query Base query, pre-scoped by a caller (e.g. a
-     *        delegation service forcing a parent-record filter). A uuid that
+     *        delegation service forcing a parent-record filter). A [[routeKeyParam]] that
      *        exists but doesn't match the scope naturally 404s here — no
      *        separate ownership check needed. Defaults to a fresh, unscoped
      *        query when omitted.
@@ -28,12 +28,12 @@ class [[ModuleName]]EditService
             $validParams = self::validateParams($params);
             $baseQuery = $query ?? [[ModuleName]]Model::query();
             // Record scope seam: an app whose BaseModel defines applyRecordScope() narrows this
-            // fetch to the rows the acting user may reach, so an out-of-scope uuid is "not found"
+            // fetch to the rows the acting user may reach, so an out-of-scope [[routeKeyParam]] is "not found"
             // below exactly like a missing one. No-op in an app without that method.
             if (method_exists([[ModuleName]]Model::class, 'applyRecordScope')) {
                 $baseQuery = [[ModuleName]]Model::applyRecordScope($baseQuery);
             }
-            $model = $baseQuery->where(['uuid' => $validParams['uuid']])->first();
+            $model = $baseQuery->where(['[[routeKeyParam]]' => $validParams['[[routeKeyParam]]']])->first();
             if (!$model) {
                 $notFoundCode = method_exists([[ModuleName]]Model::class, 'isLocationBearing') && [[ModuleName]]Model::isLocationBearing() ? 422 : 404;
                 abort($notFoundCode, 'Record not found');
@@ -70,11 +70,11 @@ class [[ModuleName]]EditService
         return validator(
             $params,
             [
-                'uuid' => ["required", "string", "exists:[[tableName]],uuid"],
+                '[[routeKeyParam]]' => ["required", "[[routeKeyRule]]", "exists:[[tableName]],[[routeKeyParam]]"],
             ], [
-                'uuid.required' => 'The Uuid field is required.',
-                'uuid.string' => 'The Uuid must be a string.',
-                'uuid.exists' => 'The selected Uuid is invalid or does not exist in [[tableName]].',
+                '[[routeKeyParam]].required' => 'The [[routeKeyLabel]] field is required.',
+                '[[routeKeyParam]].[[routeKeyRule]]' => 'The [[routeKeyLabel]] must be a [[routeKeyRule]].',
+                '[[routeKeyParam]].exists' => 'The selected [[routeKeyLabel]] is invalid or does not exist in [[tableName]].',
             ]
         )->validate();
     }

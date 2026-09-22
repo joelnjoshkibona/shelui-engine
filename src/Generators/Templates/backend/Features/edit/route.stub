@@ -1,1 +1,1 @@
-Route::middleware(['auth:sanctum', 'permission:[[endpointPermission]]'])->put('/[[moduleRoute]]/{uuid}/edit', [[[ModuleName]]Controller::class, 'edit[[ModuleName]]']);
+Route::middleware(['auth:sanctum', 'permission:[[endpointPermission]]'])->put('/[[moduleRoute]]/{[[routeKeyParam]]}/edit', [[[ModuleName]]Controller::class, 'edit[[ModuleName]]']);

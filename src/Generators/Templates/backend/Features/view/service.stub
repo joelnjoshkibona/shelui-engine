@@ -14,7 +14,7 @@ class [[ModuleName]]ViewService
     protected static array $eagerLoadRelationships = [[eagerLoadRelationships]];
 
     /**
-     * @param array $params Route params (uuid)
+     * @param array $params Route params ([[routeKeyParam]])
      * @param Builder|null $query Base query, pre-scoped by a caller (e.g. a
      *        delegation service forcing a parent-record filter). Defaults to
      *        a fresh, unscoped query when omitted.
@@ -25,12 +25,12 @@ class [[ModuleName]]ViewService
             $validParams = self::validateParams($params);
             $baseQuery = $query ?? [[ModuleName]]Model::query()[[withTrashedCall]];
             // Record scope seam: an app whose BaseModel defines applyRecordScope() narrows this
-            // fetch to the rows the acting user may reach, so an out-of-scope uuid is "not found"
+            // fetch to the rows the acting user may reach, so an out-of-scope [[routeKeyParam]] is "not found"
             // below exactly like a missing one. No-op in an app without that method.
             if (method_exists([[ModuleName]]Model::class, 'applyRecordScope')) {
                 $baseQuery = [[ModuleName]]Model::applyRecordScope($baseQuery);
             }
-            $model = $baseQuery->where(['uuid' => $validParams['uuid']])->first();
+            $model = $baseQuery->where(['[[routeKeyParam]]' => $validParams['[[routeKeyParam]]']])->first();
             if(!$model) abort(404, 'Record not found');
             return self::process($validParams, $model);
         } catch(ApplicationException $e) {
@@ -45,10 +45,10 @@ class [[ModuleName]]ViewService
         return validator(
             $params,
             [
-				'uuid' => ["required", "string"],
+				'[[routeKeyParam]]' => ["required", "[[routeKeyRule]]"],
 			], [
-				'uuid.string' => 'The Uuid must be a string.',
-				'uuid.required' => 'The Uuid is required.',
+				'[[routeKeyParam]].[[routeKeyRule]]' => 'The [[routeKeyLabel]] must be a [[routeKeyRule]].',
+				'[[routeKeyParam]].required' => 'The [[routeKeyLabel]] is required.',
 			]
         )->validate();
     }

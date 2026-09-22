@@ -1,5 +1,5 @@
-    public function delete[[ModuleName]](Request $request, $uuid)
+    public function delete[[ModuleName]](Request $request, $[[routeKeyParam]])
     {
-        $result = [[ModuleName]]DeleteService::execute($request->all(), ['uuid' => $uuid]);
+        $result = [[ModuleName]]DeleteService::execute($request->all(), ['[[routeKeyParam]]' => $[[routeKeyParam]]]);
         return response()->json($result, $result['code']);
     }

@@ -78,6 +78,28 @@ class BaseServiceGeneratorTest extends TestCase
         $this->assertSame("['name', 'parent_id', 'status_id', 'id', 'uuid', 'created_at']", $result);
     }
 
+    /**
+     * shelui-engine fork: has_uuid: false modules have no uuid column at all —
+     * offering it as a filter would query a nonexistent column. Confirms both
+     * that it's dropped AND that "id"/"created_at" ordering is unaffected
+     * (regression coverage for the array-order bug this exact change
+     * introduced and fixed during development — see BaseGenerator.php's
+     * generateFilterableFields()).
+     */
+    public function test_filterable_fields_omits_uuid_when_has_uuid_is_false(): void
+    {
+        $generator = $this->makeGenerator([
+            'has_uuid' => false,
+            'features' => ['backend' => ['list' => [
+                'filterableFields' => ['name', 'parent_id', 'status_id'],
+            ]]],
+        ]);
+
+        $result = $generator->callGenerateFilterableFields();
+
+        $this->assertSame("['name', 'parent_id', 'status_id', 'id', 'created_at']", $result);
+    }
+
     public function test_filterable_fields_does_not_duplicate_id_uuid_or_created_at_if_already_configured(): void
     {
         $generator = $this->makeGenerator([

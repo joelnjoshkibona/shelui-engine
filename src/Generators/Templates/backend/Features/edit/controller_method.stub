@@ -1,5 +1,5 @@
-    public function edit[[ModuleName]](Request $request, $uuid)
+    public function edit[[ModuleName]](Request $request, $[[routeKeyParam]])
     {
-        $result = [[ModuleName]]EditService::execute($request->all(), ['uuid' => $uuid]);
+        $result = [[ModuleName]]EditService::execute($request->all(), ['[[routeKeyParam]]' => $[[routeKeyParam]]]);
         return response()->json($result, $result['code']);
     }

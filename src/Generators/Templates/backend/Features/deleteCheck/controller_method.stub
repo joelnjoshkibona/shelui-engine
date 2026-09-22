@@ -1,5 +1,5 @@
-    public function deleteCheck[[ModuleName]](Request $request, $uuid)
+    public function deleteCheck[[ModuleName]](Request $request, $[[routeKeyParam]])
     {
-        $result = [[ModuleName]]DeleteCheckService::execute(['uuid' => $uuid]);
+        $result = [[ModuleName]]DeleteCheckService::execute(['[[routeKeyParam]]' => $[[routeKeyParam]]]);
         return response()->json($result, $result['code']);
     }

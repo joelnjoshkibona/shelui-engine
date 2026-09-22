@@ -1,1 +1,1 @@
-Route::middleware(['auth:sanctum', 'permission:[[endpointPermission]]'])->get('/[[moduleRoute]]/{uuid}/view', [[[ModuleName]]Controller::class, 'view[[ModuleName]]']);
+Route::middleware(['auth:sanctum', 'permission:[[endpointPermission]]'])->get('/[[moduleRoute]]/{[[routeKeyParam]]}/view', [[[ModuleName]]Controller::class, 'view[[ModuleName]]']);

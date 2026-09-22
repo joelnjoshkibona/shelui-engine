@@ -1,1 +1,1 @@
-Route::middleware(['auth:sanctum', 'permission:[[endpointPermission]]'])->get('/[[moduleRoute]]/{uuid}/delete/check', [[[ModuleName]]Controller::class, 'deleteCheck[[ModuleName]]']);
+Route::middleware(['auth:sanctum', 'permission:[[endpointPermission]]'])->get('/[[moduleRoute]]/{[[routeKeyParam]]}/delete/check', [[[ModuleName]]Controller::class, 'deleteCheck[[ModuleName]]']);

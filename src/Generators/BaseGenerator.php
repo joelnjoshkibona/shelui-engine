@@ -102,6 +102,15 @@ abstract class BaseGenerator
             '[[namespace]]' => $this->getNamespace(),
             '[[ModuleNamespace]]' => $this->getNamespace(),
             '[[timestamp]]' => date('Y_m_d_His'),
+            // shelui-engine fork: record identifiers were hardcoded to `uuid` throughout every
+            // view/edit/delete/deleteCheck route, controller method, and service, regardless of
+            // `has_uuid` -- a module without a uuid column (has_uuid: false) had no working way to
+            // route to its own records at all. These three resolve together from the single
+            // ModuleConfigContract::hasUuid() source of truth, matching every other has_uuid-gated
+            // decision in this codebase (MigrationGenerator, ModelGenerator).
+            '[[routeKeyParam]]' => ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id',
+            '[[routeKeyLabel]]' => ModuleConfigContract::hasUuid($this->config) ? 'Uuid' : 'Id',
+            '[[routeKeyRule]]'  => ModuleConfigContract::hasUuid($this->config) ? 'string' : 'integer',
         ];
 
         $replacements = array_merge($defaultReplacements, $replacements);

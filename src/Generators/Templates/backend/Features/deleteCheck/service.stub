@@ -10,7 +10,7 @@ use [[namespace]]\[[ModuleName]]Model;
 class [[ModuleName]]DeleteCheckService
 {
     /**
-     * @param array $params Route params (uuid)
+     * @param array $params Route params ([[routeKeyParam]])
      * @param Builder|null $query Base query, pre-scoped by a caller (e.g. a
      *        delegation service forcing a parent-record filter). Defaults to
      *        a fresh, unscoped query when omitted.
@@ -18,18 +18,18 @@ class [[ModuleName]]DeleteCheckService
     public static function execute(array $params, ?Builder $query = null): array
     {
         try {
-            if (empty($params['uuid'])) {
-                throw new ApplicationException('UUID is required');
+            if (empty($params['[[routeKeyParam]]'])) {
+                throw new ApplicationException('[[routeKeyLabel]] is required');
             }
 
             $baseQuery = $query ?? [[ModuleName]]Model::query();
             // Record scope seam: an app whose BaseModel defines applyRecordScope() narrows this
-            // fetch to the rows the acting user may reach, so an out-of-scope uuid is "not found"
+            // fetch to the rows the acting user may reach, so an out-of-scope [[routeKeyParam]] is "not found"
             // below exactly like a missing one. No-op in an app without that method.
             if (method_exists([[ModuleName]]Model::class, 'applyRecordScope')) {
                 $baseQuery = [[ModuleName]]Model::applyRecordScope($baseQuery);
             }
-            $record = $baseQuery->where('uuid', $params['uuid'])->first();
+            $record = $baseQuery->where('[[routeKeyParam]]', $params['[[routeKeyParam]]'])->first();
 
             if (!$record) {
                 throw new ApplicationException('Record not found');

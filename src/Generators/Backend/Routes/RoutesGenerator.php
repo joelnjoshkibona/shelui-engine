@@ -6,6 +6,7 @@ use Blutrixx\GeneratorEngine\Generators\BaseGenerator;
 use Blutrixx\GeneratorEngine\Generators\PatchesRegions;
 use Blutrixx\GeneratorEngine\Generators\PathManager;
 use Blutrixx\GeneratorEngine\Helpers\DelegationConfigNormalizer;
+use Blutrixx\GeneratorEngine\Schema\ModuleConfigContract;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -229,7 +230,10 @@ class RoutesGenerator extends BaseGenerator
 
         // Add Activity History route
         $routePath = Str::kebab($this->moduleName);
-        $content .= "Route::middleware(['auth:sanctum'])->get('/{$routePath}/{uuid}/activity', [{$this->moduleName}Controller::class, 'activityHistory']);\n";
+        // shelui-engine fork: was hardcoded {uuid} regardless of has_uuid -- see the
+        // [[routeKeyParam]] default in BaseGenerator::replacePlaceholders().
+        $routeKeyParam = ModuleConfigContract::hasUuid($this->config) ? 'uuid' : 'id';
+        $content .= "Route::middleware(['auth:sanctum'])->get('/{$routePath}/{{$routeKeyParam}}/activity', [{$this->moduleName}Controller::class, 'activityHistory']);\n";
 
         return $content;
     }

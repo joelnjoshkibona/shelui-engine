@@ -1,5 +1,5 @@
-    public function view[[ModuleName]]($uuid)
+    public function view[[ModuleName]]($[[routeKeyParam]])
     {
-        $result = [[ModuleName]]ViewService::execute(['uuid' => $uuid]);
+        $result = [[ModuleName]]ViewService::execute(['[[routeKeyParam]]' => $[[routeKeyParam]]]);
         return response()->json($result, $result['code']);
     }
