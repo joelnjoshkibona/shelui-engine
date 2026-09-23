@@ -19,6 +19,7 @@ class ListServiceGenerator extends BaseServiceGenerator
         $replacements = [
             '[[filterableFields]]' => $this->generateFilterableFields(),
             '[[sortableFields]]' => $this->generateSortableFields(),
+            '[[defaultSortField]]' => $this->generateDefaultSortField(),
             '[[eagerLoadRelationships]]' => $this->generateEagerLoadRelationships('list'),
             '[[locationScopeIncludesNull]]' => $this->generateLocationScopeFlags(),
             '[[filterableRelationships]]' => $this->generateFilterableRelationships(),

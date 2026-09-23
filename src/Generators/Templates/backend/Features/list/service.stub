@@ -28,6 +28,13 @@ class [[ModuleName]]ListService
     protected static array $sortableFields = [[sortableFields]];
 
     /**
+     * Sort column/direction used when the request specifies none, and the
+     * fallback when an invalid ?sort= is given. 'created_at' unless this
+     * module's timestamps are named differently (timestamp_columns).
+     */
+    protected static string $defaultSortField = '[[defaultSortField]]';
+
+    /**
      * List of relationships and their fields that can be filtered
      * Format: ['relationship' => ['field1', 'field2']]
      */

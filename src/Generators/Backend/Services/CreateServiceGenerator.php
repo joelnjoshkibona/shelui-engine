@@ -72,8 +72,9 @@ class CreateServiceGenerator extends BaseServiceGenerator
         }
 
         $column = ModuleConfigContract::creatorUpdaterColumns($this->config)['created'];
+        $value  = ModuleConfigContract::creatorUpdaterActorValue($this->config);
 
-        return "\$validData['{$column}'] = Auth::id();";
+        return "\$validData['{$column}'] = {$value};";
     }
 
     private function generateInlineItemsSave(): string

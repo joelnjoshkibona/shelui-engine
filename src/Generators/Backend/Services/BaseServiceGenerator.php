@@ -77,6 +77,28 @@ abstract class BaseServiceGenerator extends BaseGenerator
     }
 
     /**
+     * The column ListServiceTrait::processListQuery() sorts by when the
+     * request gives no ?sort=, and falls back to when an invalid one is
+     * given. 'created_at' is only correct for a module that actually has
+     * that column — a module whose timestamps are renamed via
+     * timestamp_columns (this project's own legacy tables, e.g.
+     * created_date/modified_date) has no 'created_at' at all, and 500s on
+     * a bare list request there was the live symptom
+     * (`Unknown column 'created_at' in 'order clause'`, first hit against
+     * permission_group). Falls back to 'id' when the module has no
+     * timestamps at all, since 'id' is always a real, always-sortable
+     * column (generateSortableFields() above appends it unconditionally).
+     */
+    protected function generateDefaultSortField(): string
+    {
+        if (ModuleConfigContract::hasTimestamps($this->config)) {
+            return ModuleConfigContract::timestampColumns($this->config)['created'];
+        }
+
+        return 'id';
+    }
+
+    /**
      * Extract the raw, pre-system-field filterable field keys: feature-specific
      * filterFields if present, else filterableFields (array or comma-separated
      * string), else empty. Shared by generateFilterableFields() and

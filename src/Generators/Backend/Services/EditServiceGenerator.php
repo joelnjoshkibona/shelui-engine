@@ -74,7 +74,9 @@ class EditServiceGenerator extends BaseServiceGenerator
             return '';
         }
 
-        return "\$validData['{$column}'] = Auth::id();";
+        $value = ModuleConfigContract::creatorUpdaterActorValue($this->config);
+
+        return "\$validData['{$column}'] = {$value};";
     }
 
     private function generateInlineItemsSync(): string

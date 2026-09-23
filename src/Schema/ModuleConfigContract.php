@@ -267,6 +267,66 @@ final class ModuleConfigContract
     }
 
     /**
+     * The fully-qualified class name creator()/updater() BelongsTo relations
+     * point at, when hasCreatorUpdater() is true.
+     *
+     * Defaults to this project's own logged-in-user model,
+     * `App\Project\Modules\Core\Users\Users\UsersModel`, unchanged for any
+     * module that doesn't override — most tables' created_by/updated_by
+     * really do record which authenticated User acted. Override via
+     * module.json for a table whose audit columns record a different actor
+     * entirely — e.g. this project's own `permission_group`/`permission`/
+     * `menu`/`menu_category`, whose `created_by`/`modified_by` are backfilled
+     * against `worker.id` (schemas/update001.sql), not `user.id`:
+     *   "creator_updater_model": "\\App\\Project\\Modules\\Core\\Users\\Worker\\WorkerModel"
+     *
+     * @throws \InvalidArgumentException when `creator_updater_model` is
+     *         present but not a non-empty string.
+     */
+    public static function creatorUpdaterModel(array $config): string
+    {
+        $model = $config['creator_updater_model'] ?? '\\App\\Project\\Modules\\Core\\Users\\Users\\UsersModel';
+
+        if (!is_string($model) || $model === '') {
+            throw new \InvalidArgumentException('creator_updater_model must be a non-empty string.');
+        }
+
+        return $model;
+    }
+
+    /**
+     * The raw PHP expression CreateServiceGenerator/EditServiceGenerator
+     * assign into the created_by/updated_by column, when hasCreatorUpdater()
+     * is true. Defaults to `'Auth::id()'`, unchanged for any module that
+     * doesn't override — the authenticated principal's own id really is the
+     * right value for most tables. Override for a module whose audit columns
+     * record a different actor than "the logged-in model itself" — e.g. this
+     * project's own `permission_group`/`permission`/`menu`/`menu_category`,
+     * whose `created_by`/`modified_by` mean `worker.id` (schemas/
+     * update001.sql's backfill), not `user.id`, even for rows created going
+     * forward: decided over `creator_updater_model` staying in sync with a
+     * mismatched raw Auth::id() value, since a column meaning two different
+     * things depending on when a row was created defeats the point of an
+     * audit trail. Pairs with `creator_updater_model` (above) — when that's
+     * overridden to a different actor entity, this should resolve to that
+     * entity's id, not the authenticated model's own:
+     *   "creator_updater_actor_value": "Auth::user()?->worker_id"
+     *
+     * @throws \InvalidArgumentException when `creator_updater_actor_value`
+     *         is present but not a non-empty string.
+     */
+    public static function creatorUpdaterActorValue(array $config): string
+    {
+        $expr = $config['creator_updater_actor_value'] ?? 'Auth::id()';
+
+        if (!is_string($expr) || $expr === '') {
+            throw new \InvalidArgumentException('creator_updater_actor_value must be a non-empty string.');
+        }
+
+        return $expr;
+    }
+
+    /**
      * Whether this module's Model.php is hand-maintained and must never be
      * touched by generation, regardless of --force.
      *

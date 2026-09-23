@@ -36,6 +36,7 @@ class ModelGenerator extends BaseGenerator
             '[[primaryKey]]' => $this->generatePrimaryKeyProperty(),
             '[[keyType]]' => $this->generateKeyTypeProperty(),
             '[[incrementing]]' => $this->generateIncrementingProperty(),
+            '[[hasUuidOverride]]' => $this->generateHasUuidOverride(),
             '[[connection]]' => $this->generateConnection(),
             '[[timestamps]]' => $this->generateTimestamps(),
             '[[softDeletesImport]]' => $this->generateSoftDeletesImport(),
@@ -1095,6 +1096,29 @@ PHP;
         }
     }
 
+    /**
+     * shelui-engine fork: BaseModel::$hasUuid defaults to true, and nothing
+     * ever overrode it for a has_uuid: false module — MigrationGenerator
+     * correctly dropped the uuid column and FrontendRoutesGenerator/
+     * RouteGenerator correctly route by {id}, but ModelClass::hasUuid()
+     * itself still answered true, since no generator ever wrote this
+     * property. Every caller that branches on the model's own hasUuid() to
+     * decide which request param to trust — confirmed live:
+     * BaseActivityListService::execute(), which reads 'uuid' when hasUuid()
+     * says true — got the wrong answer and 422'd every request against a
+     * has_uuid: false module's /activity endpoint (a numeric id fails the
+     * uuid format regex). Emits nothing when has_uuid is true (the default,
+     * unchanged for every other module).
+     */
+    protected function generateHasUuidOverride(): string
+    {
+        if (ModuleConfigContract::hasUuid($this->config)) {
+            return '';
+        }
+
+        return "protected static bool \$hasUuid = false;";
+    }
+
     protected function generateIncrementingProperty(): string
     {
         switch ($this->idType) {
@@ -1166,7 +1190,7 @@ PHP;
         }
 
         $columns = ModuleConfigContract::creatorUpdaterColumns($this->config);
-        $usersNs = '\\App\\Project\\Modules\\Core\\Users\\Users\\UsersModel';
+        $usersNs = ModuleConfigContract::creatorUpdaterModel($this->config);
 
         $auditRelationships = [
             "    public function creator(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",

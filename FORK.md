@@ -97,6 +97,30 @@ All four deviations above, across every backend generation path that is actually
   `uuid` prop is unchanged, since every caller (hand-written and generated) still passes the source
   record's relation id under that name; only the prop key *forwarded* onto the resolved target component
   varies. Full suite: 1402 tests passing (was 1334 before the frontend pass began).
+- **Creator/updater actor identity, default sort field, and `hasUuid()` on the model itself** — found
+  while first generating a real `has_uuid: false` module with worker-attributed (not user-attributed)
+  audit columns (`shelui_erp`'s `PermissionGroup`/`Permission`, against `permission_group`/`permission`):
+  `ModelGenerator::generateAuditRelationships()` hardcoded `creator()`/`updater()` to point at
+  `Users\UsersModel` regardless of what the audit columns actually mean, and `CreateServiceGenerator`/
+  `EditServiceGenerator` hardcoded the assigned value to `Auth::id()`, with no way to say "this table's
+  `created_by`/`modified_by` mean a different actor entity, and/or a different id than the authenticated
+  model's own" — new `ModuleConfigContract::creatorUpdaterModel()`/`creatorUpdaterActorValue()` cover
+  both independently (`"creator_updater_model": "...\\WorkerModel"`,
+  `"creator_updater_actor_value": "Auth::user()?->worker_id"`). Separately, `BaseServiceGenerator::
+  generateSortableFields()`'s emitted list was never the same thing as the DEFAULT sort column: `App\
+  Project\_Src\ListServiceTrait::processListQuery()` (the shelui_erp app-side shared trait) hardcoded
+  `'created_at'` as both the no-`?sort=`-given default and the invalid-`?sort=`-given fallback, 500ing
+  every bare list request against a module whose timestamps are renamed via `timestamp_columns` —
+  `ListServiceGenerator` now emits a `$defaultSortField` static property (`ModuleConfigContract::
+  hasTimestamps()`/`timestampColumns()`-derived) that the trait reads via the same `getStaticProperty()`
+  pattern `$sortableFields` already used, falling back to today's `'created_at'` for any module that
+  doesn't declare it. Last: `ModelGenerator` never emitted a `$hasUuid` override at all for a
+  `has_uuid: false` module — the migration/routes correctly dropped/rewired around the missing `uuid`
+  column, but `ModelClass::hasUuid()` itself still answered `BaseModel`'s own default `true`, so any
+  caller branching on the model's own `hasUuid()` (confirmed live: `App\Project\_Src\
+  BaseActivityListService::execute()`, which trusts `uuid` over `id` when `hasUuid()` says true) got the
+  wrong answer and 422'd a numeric id against the uuid-format regex. `ModelGenerator` now emits
+  `protected static bool $hasUuid = false;` when `has_uuid` is false, silent (unchanged) otherwise.
 
 ## What's deliberately NOT fixed
 
@@ -123,6 +147,12 @@ All four deviations above, across every backend generation path that is actually
   convention for identifying rows *within* an inline-items JSON payload or list, unrelated to whether
   the parent or child module has a real `uuid` column. `inline_items` children are this project's own
   generator-native tables, not legacy-repointed ones, so this was never in scope.
+- **`inline_items`' own child-row creator/updater actor value** — `BaseServiceGenerator::
+  buildInlineInjectArray()` still hardcodes `Auth::id()` for a child row's own audit column
+  (`resolveChildAuditColumn()`'s companion value, parallel to the `creator_updater_actor_value` fix
+  above but for the inline-items code path specifically). No `inline_items` child in shelui_erp
+  currently has worker-attributed (non-`Auth::id()`) audit columns, so this was left as a known,
+  documented gap rather than guessed at — same reasoning as the delegation child-key gap below.
 - **Cosmetic internal naming** — a JS variable, Vue prop, or PHPUnit local variable literally named
   `uuid` whose *value* is already correctly sourced from the right place (e.g. a route param already
   resolved via `idParam`/`routeKeyParam`) is left named `uuid` rather than renamed to `id`/`recordKey`
