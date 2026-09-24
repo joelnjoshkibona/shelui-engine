@@ -25,7 +25,7 @@ abstract class [[ModuleName]]TestCase extends TestCase
     {
         parent::setUp();
 
-        Sanctum::actingAs(UsersModel::find(UsersModel::DEVELOPER));
+        Sanctum::actingAs(UsersModel::find([[TestActorIdExpr]]));
     }
 
 [[fixtureHelper]]

@@ -396,6 +396,70 @@ class MigrationGenerator extends BaseGenerator
         return $prefix . $suffix;
     }
 
+    /**
+     * Laravel-convention system column names — SchemaIntrospector::
+     * SKIP_COLUMNS minus 'id'/'uuid' (irrelevant here: the id column has
+     * its own dedicated skip in generateFieldSchema(), and uuid has its own
+     * dedicated generateUuidLine()). SchemaIntrospector excludes exactly
+     * these from live introspection, on the understanding that
+     * generateAuditFields()/generateTimestampsLine()/generateSoftDeletesLine()
+     * own emitting them — so a REAL introspected `columns` array can never
+     * legitimately contain one of these exact names. See
+     * columnAlreadyDeclaredElsewhere()'s docblock for why that matters.
+     */
+    private const RESERVED_SYSTEM_COLUMN_NAMES = [
+        'created_at', 'updated_at', 'deleted_at', 'created_by_id', 'updated_by_id',
+    ];
+
+    /**
+     * Whether $name is already declared by generateSchema()'s per-field
+     * loop over $this->fields (the introspected/configured `columns` list)
+     * — every OTHER field-emission method below (generateAuditFields(),
+     * generateTimestampsLine(), generateSoftDeletesLine()) must skip a
+     * configured column name this returns true for, rather than declaring
+     * it a second time.
+     *
+     * Deliberately returns false outright for one of
+     * self::RESERVED_SYSTEM_COLUMN_NAMES, even if it happens to appear in
+     * $this->fields — SchemaIntrospector::SKIP_COLUMNS guarantees that name
+     * is never a REAL introspected column (see that constant's docblock),
+     * so its presence in a hand-authored config is being used as the
+     * flag-absent fallback-detection SIGNAL ModuleConfigContract::
+     * hasSoftDeletes()/hasTimestamps()/hasCreatorUpdater() document
+     * ("rescan $config['columns'] for a field literally named ...") —
+     * *not* a real, separately-declared column that would make the emitter
+     * below's own declaration a duplicate. Confirmed against
+     * ModuleConfigContractTest::test_model_and_migration_generators_agree_on_has_soft_deletes()'s
+     * "deleted_at column present, flag absent" case: MigrationGenerator
+     * must still emit `$table->softDeletes();` there.
+     *
+     * Bug this guards against, for anything NOT in that reserved list: a
+     * legacy table this project adapts in place (see
+     * MigrationGeneratorCustomColumnNamesTest's class docblock) can have
+     * creator_updater_columns/timestamp_columns/soft_delete_column point at
+     * a column name introspection ALREADY found and put in $this->fields —
+     * e.g. a real, nullable, non-FK-typed `created_by` integer column with
+     * no `_id` suffix (SKIP_COLUMNS only recognises 'created_by_id', so a
+     * differently-spelled real column survives introspection as an
+     * ordinary field). Confirmed live against `ward`
+     * (creator_updater_columns: {created_by: created_by, updated_by:
+     * null}): generateSchema() emitted
+     * `$table->integer('created_by')->nullable();` for the real,
+     * introspected column, and generateAuditFields() then ALSO emitted a
+     * second, wrong-typed `$table->foreignId('created_by');` for the exact
+     * same name — it treated the configured name as "always declare a
+     * fresh column" with no check against what generateSchema() had
+     * already declared.
+     */
+    protected function columnAlreadyDeclaredElsewhere(string $name): bool
+    {
+        if (in_array($name, self::RESERVED_SYSTEM_COLUMN_NAMES, true)) {
+            return false;
+        }
+
+        return in_array($name, array_column($this->fields, 'name'), true);
+    }
+
     protected function generateAuditFields(): string
     {
         if (!$this->hasCreatorUpdater()) {
@@ -410,9 +474,16 @@ class MigrationGenerator extends BaseGenerator
         // returns 'updated' => null) gets only the creator column.
         $columns = ModuleConfigContract::creatorUpdaterColumns($this->config);
 
-        $auditFields = ["\$table->foreignId('{$columns['created']}');"];
-        if ($columns['updated'] !== null) {
+        $auditFields = [];
+        if (!$this->columnAlreadyDeclaredElsewhere($columns['created'])) {
+            $auditFields[] = "\$table->foreignId('{$columns['created']}');";
+        }
+        if ($columns['updated'] !== null && !$this->columnAlreadyDeclaredElsewhere($columns['updated'])) {
             $auditFields[] = "\$table->foreignId('{$columns['updated']}')->nullable();";
+        }
+
+        if (empty($auditFields)) {
+            return '';
         }
 
         return "\n            " . implode("\n            ", $auditFields);
@@ -478,6 +549,15 @@ class MigrationGenerator extends BaseGenerator
      * rather than two spelled-out `$table->timestamp()` calls, so every
      * module generated before this accessor existed produces byte-identical
      * output.
+     *
+     * Guards against the same already-declared-column duplication
+     * generateAuditFields() guards against (see
+     * columnAlreadyDeclaredElsewhere()'s docblock) — a custom
+     * `timestamp_columns` name can equally coincide with a real column
+     * introspection already put in $this->fields. Never trips for the
+     * default 'created_at'/'updated_at' pair specifically (that reserved-
+     * name carve-out is columnAlreadyDeclaredElsewhere()'s job, not this
+     * method's).
      */
     protected function generateTimestampsLine(): string
     {
@@ -486,11 +566,27 @@ class MigrationGenerator extends BaseGenerator
         }
 
         $columns = ModuleConfigContract::timestampColumns($this->config);
-        if ($columns['created'] === 'created_at' && $columns['updated'] === 'updated_at') {
+        $createdAlreadyDeclared = $this->columnAlreadyDeclaredElsewhere($columns['created']);
+        $updatedAlreadyDeclared = $this->columnAlreadyDeclaredElsewhere($columns['updated']);
+
+        if ($createdAlreadyDeclared && $updatedAlreadyDeclared) {
+            return '';
+        }
+
+        if (!$createdAlreadyDeclared && !$updatedAlreadyDeclared
+            && $columns['created'] === 'created_at' && $columns['updated'] === 'updated_at') {
             return '$table->timestamps();';
         }
 
-        return "\$table->timestamp('{$columns['created']}')->nullable();\n            \$table->timestamp('{$columns['updated']}')->nullable();";
+        $lines = [];
+        if (!$createdAlreadyDeclared) {
+            $lines[] = "\$table->timestamp('{$columns['created']}')->nullable();";
+        }
+        if (!$updatedAlreadyDeclared) {
+            $lines[] = "\$table->timestamp('{$columns['updated']}')->nullable();";
+        }
+
+        return implode("\n            ", $lines);
     }
 
     /**
@@ -502,6 +598,14 @@ class MigrationGenerator extends BaseGenerator
      * column NAME either way, so `$table->softDeletes()` still emits for
      * the untouched default case and only spells out a custom name
      * (`$table->softDeletes('...')`) when one was configured.
+     *
+     * Guards against the same already-declared-column duplication
+     * generateAuditFields() guards against (see
+     * columnAlreadyDeclaredElsewhere()'s docblock) — a custom
+     * `soft_delete_column` (flag type especially: its OWN default is
+     * already the non-reserved name `is_deleted`, this project's real
+     * convention) can equally coincide with a real column introspection
+     * already put in $this->fields.
      */
     protected function generateSoftDeletesLine(): string
     {
@@ -510,6 +614,9 @@ class MigrationGenerator extends BaseGenerator
         }
 
         $column = ModuleConfigContract::softDeleteColumn($this->config);
+        if ($this->columnAlreadyDeclaredElsewhere($column)) {
+            return '';
+        }
 
         if (ModuleConfigContract::softDeleteType($this->config) === 'flag') {
             return "\$table->boolean('{$column}')->default(false);";

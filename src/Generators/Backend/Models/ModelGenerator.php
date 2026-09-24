@@ -1182,6 +1182,14 @@ PHP;
      * moment anything eager-loads it, the exact bug hasCreatorUpdater()
      * itself already guards against for a module with no audit columns at
      * all.
+     *
+     * The relation TARGET (what model created_by/updated_by actually points
+     * at) comes from ModuleConfigContract::creatorUpdaterModel() rather than
+     * a literal here — this used to hardcode the exact same fake
+     * placeholder that accessor still defaults to (`Users\Users\UsersModel`,
+     * never a real class in a consuming app), so every module regenerated
+     * that literal unconditionally and had no way to point it at a real
+     * model instead.
      */
     protected function generateAuditRelationships(): string
     {
@@ -1190,7 +1198,14 @@ PHP;
         }
 
         $columns = ModuleConfigContract::creatorUpdaterColumns($this->config);
-        $usersNs = ModuleConfigContract::creatorUpdaterModel($this->config);
+        // '\\' . ltrim(...) rather than the bare accessor return value:
+        // creatorUpdaterModel()'s own default already carries a leading
+        // backslash, but a module.json override is not guaranteed to (see
+        // its docblock's own example, which has none) — embedded bare as
+        // "{$usersNs}::class" inside this NAMESPACED generated file, an
+        // override lacking one would resolve as a namespace-RELATIVE class
+        // reference instead of the intended fully-qualified one.
+        $usersNs = '\\' . ltrim(ModuleConfigContract::creatorUpdaterModel($this->config), '\\');
 
         $auditRelationships = [
             "    public function creator(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",

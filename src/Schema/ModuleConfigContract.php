@@ -327,6 +327,90 @@ final class ModuleConfigContract
     }
 
     /**
+     * The FQCN of the Sanctum-authenticatable model every generated PHPUnit
+     * test suite logs in as (`Sanctum::actingAs(...)` in
+     * `{Module}TestCase::setUp()`), and that
+     * `PhpUnitTestGenerator::usersModelImportLine()` imports under the fixed
+     * local alias `UsersModel` — every generated test file's other
+     * `UsersModel::...` references (the audit-column fixture value, JSON-path
+     * assertions, the location-scoping fixture heuristic) go through that
+     * same alias, so they all move together when this changes.
+     *
+     * A DIFFERENT question from creatorUpdaterModel()/creatorUpdaterActorValue()
+     * (above): those answer "what model/value does THIS module's created_by/
+     * updated_by column mean", assuming SOMEONE is already authenticated —
+     * `creatorUpdaterActorValue()`'s own default, `'Auth::id()'`, can't
+     * bootstrap Sanctum::actingAs() itself (nothing is authenticated yet at
+     * that point — the test actor is what Auth::id() reads back afterward).
+     * This one answers "what does the app's Sanctum guard actually
+     * authenticate for a generated test" — a module's audit columns can
+     * legitimately point at a different, non-authenticatable model (e.g. the
+     * `permission_group`/`permission` Worker case creatorUpdaterModel()'s own
+     * docblock describes) while every HTTP request in the app, generated
+     * tests included, still logs in as a real Sanctum-guarded User. Most
+     * consumers never draw that distinction, which is why this defaults to
+     * creatorUpdaterModel() when not set — overriding creator_updater_model
+     * alone (the existing, older key) keeps working unchanged for them; a
+     * consumer that needs the split sets `test_actor_model` on its own,
+     * without disturbing creator_updater_model:
+     *   "test_actor_model": "App\\Project\\Modules\\Core\\Users\\User\\UserModel"
+     *
+     * @throws \InvalidArgumentException when `test_actor_model` is present
+     *         but not a non-empty string.
+     */
+    public static function testActorModel(array $config): string
+    {
+        if (!array_key_exists('test_actor_model', $config)) {
+            return self::creatorUpdaterModel($config);
+        }
+
+        $value = $config['test_actor_model'];
+        if (!is_string($value) || trim($value) === '') {
+            throw new \InvalidArgumentException('test_actor_model must be a non-empty string.');
+        }
+
+        return $value;
+    }
+
+    /**
+     * The PHP expression, written in terms of the `UsersModel` alias
+     * testActorModel() is imported under, that yields the acting test
+     * user's id — e.g. the default `'UsersModel::DEVELOPER'` reads a
+     * `DEVELOPER` constant off whatever class that alias resolves to. Used
+     * only to bootstrap `Sanctum::actingAs(UsersModel::find(...))` itself
+     * (see testActorModel()'s docblock for why creatorUpdaterActorValue()'s
+     * `Auth::id()`-shaped default can't do that job).
+     *
+     * A consumer whose replacement test-actor model has no `DEVELOPER`
+     * constant (or names the seeded developer row differently) overrides
+     * this independently of testActorModel(), e.g.:
+     *   "test_actor_id_expression": "UsersModel::first()->id"
+     *
+     * Every reference to this expression is written in terms of the literal
+     * token `UsersModel` — PhpUnitTestGenerator substitutes that token for
+     * either the bare alias (a file that already imports it) or the fully-
+     * qualified testActorModel() class name (a literal embedded somewhere
+     * that doesn't), so a caller-supplied expression must also lead with
+     * `UsersModel` to work in both places.
+     *
+     * @throws \InvalidArgumentException when `test_actor_id_expression` is
+     *         present but not a non-empty string.
+     */
+    public static function testActorIdExpression(array $config): string
+    {
+        if (!array_key_exists('test_actor_id_expression', $config)) {
+            return 'UsersModel::DEVELOPER';
+        }
+
+        $value = $config['test_actor_id_expression'];
+        if (!is_string($value) || trim($value) === '') {
+            throw new \InvalidArgumentException('test_actor_id_expression must be a non-empty string.');
+        }
+
+        return $value;
+    }
+
+    /**
      * Whether this module's Model.php is hand-maintained and must never be
      * touched by generation, regardless of --force.
      *

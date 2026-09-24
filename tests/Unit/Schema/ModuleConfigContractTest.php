@@ -355,4 +355,81 @@ class ModuleConfigContractTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         ModuleConfigContract::creatorUpdaterColumns(['creator_updater_columns' => ['updated_by' => '']]);
     }
+
+    // ─── ModuleConfigContract::creatorUpdaterModel() direct coverage ───────
+
+    public function test_contract_creator_updater_model_defaults_to_the_historical_placeholder(): void
+    {
+        $this->assertSame(
+            '\\App\\Project\\Modules\\Core\\Users\\Users\\UsersModel',
+            ModuleConfigContract::creatorUpdaterModel([])
+        );
+    }
+
+    public function test_contract_creator_updater_model_trusts_explicit_override(): void
+    {
+        $config = ['creator_updater_model' => 'App\\Project\\Modules\\Core\\Users\\User\\UserModel'];
+        $this->assertSame(
+            'App\\Project\\Modules\\Core\\Users\\User\\UserModel',
+            ModuleConfigContract::creatorUpdaterModel($config)
+        );
+    }
+
+    public function test_contract_creator_updater_model_rejects_empty_string(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::creatorUpdaterModel(['creator_updater_model' => '']);
+    }
+
+    // ─── ModuleConfigContract::testActorModel() direct coverage ────────────
+
+    public function test_contract_test_actor_model_defaults_to_creator_updater_model_when_absent(): void
+    {
+        $this->assertSame(
+            ModuleConfigContract::creatorUpdaterModel([]),
+            ModuleConfigContract::testActorModel([])
+        );
+
+        $config = ['creator_updater_model' => 'App\\Project\\Modules\\Core\\Users\\User\\UserModel'];
+        $this->assertSame(
+            'App\\Project\\Modules\\Core\\Users\\User\\UserModel',
+            ModuleConfigContract::testActorModel($config)
+        );
+    }
+
+    public function test_contract_test_actor_model_overrides_independently_of_creator_updater_model(): void
+    {
+        $config = [
+            'creator_updater_model' => 'App\\Project\\Modules\\Core\\Workers\\Worker\\WorkerModel',
+            'test_actor_model' => 'App\\Project\\Modules\\Core\\Users\\User\\UserModel',
+        ];
+
+        $this->assertSame('App\\Project\\Modules\\Core\\Users\\User\\UserModel', ModuleConfigContract::testActorModel($config));
+        $this->assertSame('App\\Project\\Modules\\Core\\Workers\\Worker\\WorkerModel', ModuleConfigContract::creatorUpdaterModel($config));
+    }
+
+    public function test_contract_test_actor_model_rejects_empty_string(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::testActorModel(['test_actor_model' => '']);
+    }
+
+    // ─── ModuleConfigContract::testActorIdExpression() direct coverage ─────
+
+    public function test_contract_test_actor_id_expression_defaults_to_users_model_developer(): void
+    {
+        $this->assertSame('UsersModel::DEVELOPER', ModuleConfigContract::testActorIdExpression([]));
+    }
+
+    public function test_contract_test_actor_id_expression_trusts_explicit_override(): void
+    {
+        $config = ['test_actor_id_expression' => 'UsersModel::first()->id'];
+        $this->assertSame('UsersModel::first()->id', ModuleConfigContract::testActorIdExpression($config));
+    }
+
+    public function test_contract_test_actor_id_expression_rejects_empty_string(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        ModuleConfigContract::testActorIdExpression(['test_actor_id_expression' => '']);
+    }
 }

@@ -48,7 +48,21 @@ class PhpUnitTestGenerator extends BaseGenerator
 {
     use PatchesRegions;
 
-    protected const USERS_MODEL_FQCN = 'App\\Project\\Modules\\Core\\Users\\Users\\UsersModel';
+    /**
+     * shelui-engine fork: this used to be a fixed constant
+     * ('App\Project\Modules\Core\Users\Users\UsersModel', a fake placeholder
+     * that never existed in a real consuming app) referenced directly
+     * everywhere this file needed the Sanctum-authenticatable test-actor
+     * model. Every one of those call sites now goes through
+     * ModuleConfigContract::testActorModel()/testActorIdExpression() instead
+     * — see testActorFqcn()/testActorIdExpression()/
+     * testActorIdExpressionQualified() below — so a consuming app that
+     * deletes/renames that fake module (as shelui_erp did) can override it
+     * without this generator emitting a reference to a class that no longer
+     * exists. Both accessors default to the exact same literal this
+     * constant held, so a module that never overrides `test_actor_model`/
+     * `creator_updater_model` gets byte-for-byte identical generated output.
+     */
 
     /**
      * Hand-written fixture helpers/imports live inside these regions and
@@ -471,6 +485,7 @@ class PhpUnitTestGenerator extends BaseGenerator
         return $this->replacePlaceholders($stub, [
             '[[testNamespace]]'    => $this->getNamespace() . '\Tests',
             '[[UsersModelImport]]' => $this->usersModelImportLine(),
+            '[[TestActorIdExpr]]'  => $this->testActorIdExpression(),
             '[[fixtureHelper]]'    => $this->buildFixtureHelper($fields),
         ]);
     }
@@ -987,13 +1002,61 @@ class PhpUnitTestGenerator extends BaseGenerator
         return $this->writeFileAlways($this->splitTestFilePath($suffix), $content);
     }
 
+    /**
+     * ModuleConfigContract::testActorModel() with its leading backslash
+     * (if any) stripped, since every use site below either builds a `use`
+     * statement (which never takes one) or re-prefixes one of its own for a
+     * fully-qualified reference.
+     */
+    protected function testActorFqcn(): string
+    {
+        return ltrim(ModuleConfigContract::testActorModel($this->config), '\\');
+    }
+
+    /** ModuleConfigContract::testActorIdExpression() — see its own docblock. */
+    protected function testActorIdExpression(): string
+    {
+        return ModuleConfigContract::testActorIdExpression($this->config);
+    }
+
+    /**
+     * testActorIdExpression(), with its leading `UsersModel` alias token
+     * replaced by the fully-qualified testActorFqcn() — for the one call
+     * site (the location-scoping fixture heuristic in
+     * buildFieldValueLiteral()) whose literal is embedded self-contained,
+     * with no guarantee the `UsersModel` import alias is in scope wherever
+     * it lands.
+     */
+    protected function testActorIdExpressionQualified(): string
+    {
+        return preg_replace('/\bUsersModel\b/', '\\\\' . $this->testActorFqcn(), $this->testActorIdExpression(), 1);
+    }
+
     protected function usersModelImportLine(): string
     {
-        $moduleModelFqcn = $this->getNamespace() . '\\' . $this->moduleName . 'Model';
+        $moduleModelFqcn = ltrim($this->getNamespace() . '\\' . $this->moduleName . 'Model', '\\');
+        $testActorFqcn = $this->testActorFqcn();
+        $testActorShortName = substr($testActorFqcn, strrpos($testActorFqcn, '\\') + 1) ?: $testActorFqcn;
 
-        return $moduleModelFqcn === self::USERS_MODEL_FQCN
-            ? ''
-            : 'use ' . self::USERS_MODEL_FQCN . ";\n";
+        // Importing the SAME class twice under the SAME alias is a PHP
+        // fatal ("...because the name is already in use") -- this is
+        // exactly what happens when a module generates tests for ITSELF as
+        // the configured test actor (e.g. the fake Users/UsersModel
+        // module's own suite, before this fork's fixes existed to remove
+        // it): its own model is already imported, unaliased, via the
+        // `use [[namespace]]\[[ModuleName]]Model;` line in this same stub,
+        // under that exact short name. Skip this import entirely in that
+        // one case; every other case aliases the resolved test-actor class
+        // to the fixed local name `UsersModel` every other reference in
+        // this generator's output expects (see testActorIdExpression()'s
+        // docblock).
+        if ($moduleModelFqcn === $testActorFqcn && $testActorShortName === 'UsersModel') {
+            return '';
+        }
+
+        return $testActorShortName === 'UsersModel'
+            ? 'use ' . $testActorFqcn . ";\n"
+            : 'use ' . $testActorFqcn . ' as UsersModel' . ";\n";
     }
 
     /**
@@ -1440,18 +1503,27 @@ class PhpUnitTestGenerator extends BaseGenerator
             // visibility into that mechanism (it's entirely hand-maintained,
             // outside generator-engine), so it can't detect *whether* a
             // consumer applies location-scoping -- but reusing whatever
-            // location DEVELOPER (UsersModel::DEVELOPER, already the
-            // established creator/updater convention throughout this
-            // generator) is actually assigned to, falling back to a fresh
+            // location the configured test actor (testActorIdExpressionQualified()
+            // — already the established creator/updater convention throughout
+            // this generator) is actually assigned to, falling back to a fresh
             // factory row only if they have none, is strictly safer than
             // always creating an unrelated one: correct whether or not the
             // consumer scopes by location, since an unscoped consumer never
             // looks at `UserLocations` at all.
+            //
+            // shelui-engine fork: this used to resolve `Users` through
+            // PathManager::resolveBackendModuleNamespace('Users') and
+            // hardcode `\UsersModel::DEVELOPER` on the end -- a registry
+            // lookup for a module a consumer may have deleted entirely (see
+            // ModuleConfigContract::testActorModel()'s docblock), which
+            // fails closed into a NOISY warning + guessed fallback rather
+            // than the class simply not existing. testActorIdExpressionQualified()
+            // resolves the same "who is the acting test user" fact through
+            // config instead, with no registry lookup at all.
             if ($field === 'location_id' && $foreignTable === 'locations') {
                 $userLocationsNs = PathManager::resolveBackendModuleNamespace('UserLocations');
-                $usersNs = PathManager::resolveBackendModuleNamespace('Users');
                 $locationsNs = PathManager::resolveBackendModuleNamespace('Locations');
-                return "\\{$userLocationsNs}\\UserLocationsModel::where('user_id', \\{$usersNs}\\UsersModel::DEVELOPER)->value('location_id') ?? \\{$locationsNs}\\LocationsModel::factory()->create()->id";
+                return "\\{$userLocationsNs}\\UserLocationsModel::where('user_id', {$this->testActorIdExpressionQualified()})->value('location_id') ?? \\{$locationsNs}\\LocationsModel::factory()->create()->id";
             }
 
             $resolved = $this->resolveCrossModuleFkLiteral($foreignTable);
@@ -2071,11 +2143,14 @@ class PhpUnitTestGenerator extends BaseGenerator
         // (BaseModel's schema-driven getFillable() silently drops an
         // attribute that isn't a real column) but still wrong to emit, and
         // the literal column name never matched a module.json override
-        // (this project's legacy 'created_by' naming).
+        // (this project's legacy 'created_by' naming). The actor VALUE is
+        // now testActorIdExpression() too, not a hardcoded `UsersModel::
+        // DEVELOPER` -- see its docblock and ModuleConfigContract::
+        // testActorIdExpression().
         $createdByLine = '';
         if ($this->hasCreatorUpdater) {
             $createdByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['created'];
-            $createdByLine = "            '{$createdByColumn}' => UsersModel::DEVELOPER,\n";
+            $createdByLine = "            '{$createdByColumn}' => {$this->testActorIdExpression()},\n";
         }
 
         return <<<PHP
@@ -2302,7 +2377,7 @@ PHP;
         // audit columns keeps byte-for-byte identical output.
         if ($this->hasCreatorUpdater) {
             $createdByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['created'];
-            $assertLines[] = "            ->assertJsonPath('data.{$createdByColumn}', (int) UsersModel::DEVELOPER)";
+            $assertLines[] = "            ->assertJsonPath('data.{$createdByColumn}', (int) {$this->testActorIdExpression()})";
         }
 
         $assertBlock = implode("\n", $assertLines);
@@ -2576,7 +2651,7 @@ PHP;
         if ($this->hasCreatorUpdater) {
             $updatedByColumn = ModuleConfigContract::creatorUpdaterColumns($this->config)['updated'];
             if ($updatedByColumn !== null) {
-                $assertLines[] = "            ->assertJsonPath('data.{$updatedByColumn}', (int) UsersModel::DEVELOPER)";
+                $assertLines[] = "            ->assertJsonPath('data.{$updatedByColumn}', (int) {$this->testActorIdExpression()})";
             }
         }
 

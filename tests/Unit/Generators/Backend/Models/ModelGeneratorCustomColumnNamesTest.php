@@ -151,6 +151,41 @@ class ModelGeneratorCustomColumnNamesTest extends TestCase
         $this->assertStringNotContainsString('updated_by', $content);
     }
 
+    public function test_default_creator_updater_model_is_the_historical_placeholder(): void
+    {
+        $content = $this->generateAndRead(['has_creator_updater' => true], 'ZzzDefaultAuditModelTarget');
+
+        $this->assertStringContainsString(
+            "\\App\\Project\\Modules\\Core\\Users\\Users\\UsersModel::class, 'created_by_id', 'id'",
+            $content
+        );
+    }
+
+    /**
+     * Bug 2 (shelui-engine): creator()/updater() used to hardcode this exact
+     * fake FQCN directly (`$usersNs = '\\App\\Project\\Modules\\Core\\Users\\
+     * Users\\UsersModel';`), so a consuming app that deleted that module
+     * (retired as a never-real placeholder, e.g. shelui_erp) had no way to
+     * point the relation at its real Sanctum-authenticatable model without
+     * hand-editing every generated Model.php after every regenerate.
+     * ModuleConfigContract::creatorUpdaterModel() is now the one resolution
+     * rule ModelGenerator (this test) and PhpUnitTestGenerator (see
+     * PhpUnitTestGeneratorTestActorTest) both defer to.
+     */
+    public function test_creator_updater_model_override_changes_the_relation_target(): void
+    {
+        $content = $this->generateAndRead([
+            'has_creator_updater' => true,
+            'creator_updater_model' => 'App\\Project\\Modules\\Core\\Users\\User\\UserModel',
+        ], 'ZzzOverriddenAuditModelTarget');
+
+        $this->assertStringContainsString(
+            "\\App\\Project\\Modules\\Core\\Users\\User\\UserModel::class, 'created_by_id', 'id'",
+            $content
+        );
+        $this->assertStringNotContainsString('Users\\Users\\UsersModel', $content);
+    }
+
     public function test_custom_audit_column_declared_as_foreign_id_is_not_double_related(): void
     {
         // A column literally named 'created_by' with type foreignId must

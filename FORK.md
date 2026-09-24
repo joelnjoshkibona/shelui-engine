@@ -121,6 +121,43 @@ All four deviations above, across every backend generation path that is actually
   BaseActivityListService::execute()`, which trusts `uuid` over `id` when `hasUuid()` says true) got the
   wrong answer and 422'd a numeric id against the uuid-format regex. `ModelGenerator` now emits
   `protected static bool $hasUuid = false;` when `has_uuid` is false, silent (unchanged) otherwise.
+- **Two more bugs found building `ward`, a real legacy table adapted in place with every custom-column-
+  naming key set at once** (`creator_updater_columns`, `timestamp_columns`, `soft_delete_type: flag`):
+  - `MigrationGenerator` double-declared any configured audit/timestamp/soft-delete column whose name
+    coincided with a column introspection had already put in `$config['columns']` — confirmed against
+    `ward`'s own `created_by` (a real, nullable integer column with no `_id` suffix, so
+    `SchemaIntrospector::SKIP_COLUMNS` — which only recognises the Laravel-convention names — never
+    excluded it from introspection). `generateAuditFields()`/`generateTimestampsLine()`/
+    `generateSoftDeletesLine()` treated a configured name as "always declare a fresh column," with no
+    check against what `generateSchema()`'s own per-field loop had already emitted for that exact name.
+    `MigrationGenerator::columnAlreadyDeclaredElsewhere()` is the one check all three now share, deliberately
+    excluding the Laravel-convention default names themselves (`created_at`/`updated_at`/`deleted_at`/
+    `created_by_id`/`updated_by_id`) — those can never be REAL introspected columns by construction
+    (`SchemaIntrospector::SKIP_COLUMNS` again), so their presence in a hand-authored config is
+    `ModuleConfigContract::hasSoftDeletes()`'s documented flag-absent rescan SIGNAL, not a second real
+    column to avoid re-declaring.
+  - `PhpUnitTestGenerator` (`{Module}TestCase::setUp()`'s `Sanctum::actingAs(...)`, the audit-column
+    fixture/assertion lines) still hardcoded the identical fake FQCN the bullet above just gave
+    `ModelGenerator` an escape hatch for, `App\Project\Modules\Core\Users\Users\UsersModel` — the
+    `creator_updater_model` fix landed only in `ModelGenerator`, with zero effect on this file, so a
+    consumer that deleted that fake module (shelui_erp did: replaced by a real
+    `App\Project\Modules\Core\Users\User\UserModel`) still got a generated test suite that fataled the
+    moment it ran. Answering "who is logged in for a generated test" is also a **separate** question from
+    creator/updater columns' own target in the first place (a module's `created_by` can legitimately
+    point at a different model than the app's Sanctum guard — the exact `permission_group`/`permission`
+    Worker case above is a real instance of that split), so `PhpUnitTestGenerator` resolves it through two
+    NEW, independent accessors rather than reusing `creatorUpdaterModel()` directly:
+    `ModuleConfigContract::testActorModel()` (config key `test_actor_model`, defaulting to
+    `creatorUpdaterModel()` — a consumer that only ever overrode the older key keeps working unchanged)
+    and `testActorIdExpression()` (config key `test_actor_id_expression`, a PHP expression written in
+    terms of the fixed local alias every generated test file imports the resolved class under —
+    `UsersModel` — defaulting to the historical `'UsersModel::DEVELOPER'`; deliberately NOT
+    `creatorUpdaterActorValue()`'s own `'Auth::id()'` default, which can't bootstrap `Sanctum::actingAs()`
+    itself — see `testActorModel()`'s docblock). `ModelGenerator::generateAuditRelationships()`'s own use
+    of `creatorUpdaterModel()` also gained a leading-backslash normalization (`'\\' . ltrim(...)`) it was
+    missing: embedded bare as `{$usersNs}::class` inside a namespaced generated file, a module.json
+    override lacking one (matching that key's own docblock example) resolved as a namespace-RELATIVE
+    class reference instead of the intended fully-qualified one.
 
 ## What's deliberately NOT fixed
 
@@ -176,8 +213,11 @@ deviations documented above only.
 ## Status
 
 All four deviations patched and tested across both backend and frontend generation, plus the
-cross-module `RelatedRecordLink` identifier-resolution gap the frontend pass surfaced (full suite
-green after every change; new tests added per capability — see git log). `docs/specs/
-AUTH_DATA_ARCHITECTURE.md` §5.2 in shelui_erp has been updated to reflect `LegacyBaseModel`'s removal
-in favor of this fork's per-model column-naming emission. MobileApp generation remains unfixed and
-out of scope, deferred by explicit user request.
+cross-module `RelatedRecordLink` identifier-resolution gap the frontend pass surfaced, the creator/
+updater actor identity + default sort field + model-level `hasUuid()` gaps found generating the first
+worker-attributed `has_uuid: false` module, and the two `ward`-shaped bugs above (double-declared
+audit/timestamp/soft-delete columns; the hardcoded, un-overridable fake `UsersModel` FQCN still left in
+`PhpUnitTestGenerator` after the creator/updater fix) (full suite green after every change; new tests
+added per capability — see git log). `docs/specs/AUTH_DATA_ARCHITECTURE.md` §5.2 in shelui_erp has been
+updated to reflect `LegacyBaseModel`'s removal in favor of this fork's per-model column-naming emission.
+MobileApp generation remains unfixed and out of scope, deferred by explicit user request.
